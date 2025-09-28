@@ -90,28 +90,131 @@ cleanup() {
         log_warning "Deployment failed/interrupted - cleaning up created resources..."
         
         # Delete resources in reverse order of creation to avoid dependency issues
+        # Step 1: Delete role assignments first (required before role definition can be deleted)
+        if [ -n "$sp_object_id" ] && ([ -n "$role_definition_id" ] || [ -n "$ROLE_NAME_WITH_NONCE" ]); then
+            log_info ""
+            log_info "Checking for role assignments to delete..." "${YELLOW}"
+            
+            # Get the role ID if we don't have it yet (race condition case)
+            local cleanup_role_id="$role_definition_id"
+            if [ -z "$cleanup_role_id" ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
+                if role_list_result=$(az role definition list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                    if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
+                        cleanup_role_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
+                    fi
+                fi
+            fi
+            
+            if [ -n "$cleanup_role_id" ]; then
+                # Get role assignments for the service principal with the custom role
+                if assignments=$(az role assignment list \
+                    --assignee "$sp_object_id" \
+                    --role "$cleanup_role_id" \
+                    --scope "/subscriptions/$SUBSCRIPTION_ID" \
+                    --query "[].{id:id}" -o json 2>/dev/null); then
+                    
+                    if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
+                        assignment_count=$(echo "$assignments" | jq length)
+                        log_info "Found $assignment_count role assignment(s) to delete" "${YELLOW}"
+                        
+                        # Delete each role assignment
+                        echo "$assignments" | jq -r '.[].id' | while read -r assignment_id; do
+                            if [ -n "$assignment_id" ]; then
+                                log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
+                                if az role assignment delete --ids "$assignment_id" >/dev/null 2>&1; then
+                                    log_info "Role assignment deleted successfully" "${GREEN}"
+                                else
+                                    log_warning "Failed to delete role assignment: $assignment_id"
+                                fi
+                            fi
+                        done
+                    else
+                        log_info "No role assignments found (this is normal)" "${GREEN}"
+                    fi
+                else
+                    log_warning "Could not check for role assignments"
+                fi
+            fi
+        fi
+        
+        # Step 2: Delete custom role definition (now that assignments are gone)
+        log_info "Checking if custom role exists: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
         if [ -n "$role_definition_id" ]; then
-            log_info "Deleting custom role definition..." "${YELLOW}"
-            az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" &>/dev/null || true
+            log_info "Found! Deleting custom role definition..." "${YELLOW}"
+            if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
+                log_info "Custom role definition deleted successfully" "${GREEN}"
+            else
+                log_warning "Custom role definition deletion failed: $role_delete_result"
+            fi
+        elif [ -n "$ROLE_NAME_WITH_NONCE" ]; then
+            # Fallback: check if role exists by name and delete it (handles race conditions)
+            # Use role definition list to find the role by name pattern, then extract ID
+            if role_list_result=$(az role definition list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
+                    role_definition_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
+                    if [ -n "$role_definition_id" ] && [ "$role_definition_id" != "null" ]; then
+                        log_info "Found! Deleting custom role definition..." "${YELLOW}"
+                        log_info "Role ID: $role_definition_id" "${YELLOW}"
+                        if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
+                            log_info "Role deleted successfully" "${GREEN}"
+                        else
+                            log_warning "Role deletion failed: $delete_result"
+                        fi
+                    else
+                        log_info "Role found in list but could not extract ID" "${YELLOW}"
+                    fi
+                else
+                    log_info "Role not found in role definition list - skipping role cleanup" "${YELLOW}"
+                fi
+            else
+                log_info "Failed to list role definitions. CLI result: $role_list_result" "${YELLOW}"
+                log_info "This might be due to Azure propagation delays or subscription context issues" "${YELLOW}"
+            fi
+        else
+            log_info "No custom role information available - skipping role cleanup" "${YELLOW}"
         fi
         
+        # Step 3: Delete service principal
+        log_info ""
+        log_info "Checking if service principal exists..." "${YELLOW}"
         if [ -n "$sp_object_id" ]; then
-            log_info "Deleting service principal..." "${YELLOW}"
-            az ad sp delete --id "$sp_object_id" &>/dev/null || true
+            log_info "Found! Deleting service principal..." "${YELLOW}"
+            if sp_delete_result=$(az ad sp delete --id "$sp_object_id" 2>&1); then
+                log_info "Service principal deleted successfully" "${GREEN}"
+            else
+                log_warning "Service principal deletion failed: $sp_delete_result"
+            fi
+        else
+            log_info "No service principal information available - skipping service principal cleanup" "${YELLOW}"
         fi
         
+        # Step 4: Delete Azure AD application
+        log_info ""
+        log_info "Checking if Azure AD application exists..." "${YELLOW}"
         if [ -n "$app_id" ]; then
-            log_info "Deleting Azure AD application (and client secret)..." "${YELLOW}"
-            az ad app delete --id "$app_id" &>/dev/null || true
+            log_info "Found! Deleting Azure AD application (and client secret)..." "${YELLOW}"
+            if app_delete_result=$(az ad app delete --id "$app_id" 2>&1); then
+                log_info "Azure AD application deleted successfully" "${GREEN}"
+            else
+                log_warning "Azure AD application deletion failed: $app_delete_result"
+            fi
+        else
+            log_info "No Azure AD application information available - skipping application cleanup" "${YELLOW}"
         fi
         
         # Send failure notification to backend only for interruptions (not normal script errors)
         if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+            log_info ""
             log_info "Notifying backend of script interruption..." "${YELLOW}"
             send_backend_status "Failed" "Script interrupted or terminated unexpectedly" 2>/dev/null || true
         fi
         
-        log_info "✅ Successfully deleted the created resources" "${GREEN}"
+        # Show appropriate cleanup completion message
+        if [ -n "$role_definition_id" ] || [ -n "$sp_object_id" ] || [ -n "$app_id" ]; then
+            log_info "✅ Successfully deleted the created resources" "${GREEN}"
+        else
+            log_info "✅ Cleanup completed (no Azure resources were created)" "${GREEN}"
+        fi
     else
         log_info ""
         log_info "Deployment completed successfully - keeping created resources" "${GREEN}"
@@ -138,7 +241,13 @@ check_azure_auth() {
     # Check if we can access the target subscription
     if ! az account show --subscription "$SUBSCRIPTION_ID" &>/dev/null; then
         log_error "Cannot access subscription '$SUBSCRIPTION_ID'" >&2
-        log_error "Please check the subscription ID or run 'az account set --subscription $SUBSCRIPTION_ID'" >&2
+        log_error "Please verify:" >&2
+        log_error "  1. The subscription ID is correct and exists" >&2
+        log_error "  2. You have access to this subscription" >&2
+        log_error "  3. Try running: az account set --subscription $SUBSCRIPTION_ID" >&2
+        log_error "     (This sets your Azure CLI context to use this subscription)" >&2
+        log_error "  4. Or list available subscriptions: az account list --output table" >&2
+        log_error "     (This shows all subscriptions you have access to)" >&2
         exit 1
     fi
     
@@ -154,6 +263,12 @@ validate_uuid() {
     local var_name="$1"
     local var_value="$2"
     
+    # Check if value is empty
+    if [ -z "$var_value" ]; then
+        log_error "Missing required param: $var_name" >&2
+        exit 1
+    fi
+    
     if [[ ! "$var_value" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
         log_error "Invalid $var_name format: $var_value" >&2
         log_error "Expected UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" >&2
@@ -166,9 +281,33 @@ validate_name() {
     local var_name="$1"
     local var_value="$2"
     
-    if [[ ! "$var_value" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    # Check if value is empty
+    if [ -z "$var_value" ]; then
+        log_error "Missing required param: $var_name" >&2
+        exit 1
+    fi
+    
+    if [[ ! "$var_value" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$var_value" =~ [[:space:]] ]]; then
         log_error "Invalid $var_name format: $var_value" >&2
         log_error "$var_name should only contain letters, numbers, hyphens, and underscores" >&2
+        exit 1
+    fi
+}
+
+# Helper function to validate URL format (optional parameter)
+validate_url() {
+    local var_name="$1"
+    local var_value="$2"
+    
+    # Check if value is empty
+    if [ -z "$var_value" ]; then
+        log_error "Missing required param: $var_name" >&2
+        exit 1
+    fi
+    
+    if [[ ! "$var_value" =~ ^https?:// ]]; then
+        log_error "Invalid $var_name format: $var_value" >&2
+        log_error "$var_name must start with http:// or https://" >&2
         exit 1
     fi
 }
@@ -177,30 +316,33 @@ validate_name() {
 validate_inputs() {
     log_info "Validating input parameters..." "${CYAN}"
     
-    # Validate subscription ID format (UUID)
+    # Validate parameters in the same order as they are assigned (positions 0-7)
+    
+    # Position 0: Subscription ID (UUID format)
     validate_uuid "subscription ID" "$SUBSCRIPTION_ID"
     
-    # Validate app name (no special characters that could cause issues)
-    validate_name "App name" "$APP_NAME"
+    # Position 1: Backend URL format
+    validate_url "backend URL" "$BACKEND_URL"
     
-    # Validate role name (no special characters that could cause issues)
-    validate_name "Role name" "$ROLE_NAME"
-    
-    # Validate backend URL format (if provided)
-    if [ -n "$BACKEND_URL" ] && [[ ! "$BACKEND_URL" =~ ^https?:// ]]; then
-        log_error "Invalid backend URL format: $BACKEND_URL" >&2
-        log_error "Backend URL must start with http:// or https://" >&2
+    # Position 2: Bearer token (required)
+    if [ -z "$BEARER_TOKEN" ]; then
+        log_error "Missing required param: BEARER_TOKEN" >&2
         exit 1
     fi
     
-    # Validate UUIDs for installation and attempt IDs (if provided)
-    if [ -n "$INSTALLATION_ID" ]; then
-        validate_uuid "installation ID" "$INSTALLATION_ID"
-    fi
+    # Position 3: Installation ID (UUID format)
+    validate_uuid "installation ID" "$INSTALLATION_ID"
     
-    if [ -n "$ATTEMPT_ID" ]; then
-        validate_uuid "attempt ID" "$ATTEMPT_ID"
-    fi
+    # Position 4: Attempt ID (UUID format)
+    validate_uuid "attempt ID" "$ATTEMPT_ID"
+    
+    # Position 5: App name (alphanumeric, hyphens, underscores)
+    validate_name "app name" "$APP_NAME"
+    
+    # Position 6: Role name (alphanumeric, hyphens, underscores)
+    validate_name "role name" "$ROLE_NAME"
+    
+    # Position 7: Created by (no validation needed - has default)
     
     log_info "✅ All input parameters validated" "${GREEN}"
     log_info ""
@@ -336,33 +478,40 @@ for arg in "$@"; do
     esac
 done
 
-# Parameters - Updated to use environment variables
-SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-${filtered_args[0]:-fafcf417-5506-41bc-99e4-e7cbfd2dee1e}}"
+# Check if we have enough mandatory parameters
+if [ ${#filtered_args[@]} -lt 5 ]; then
+    log_error "Missing required parameters. Expected 5 mandatory parameters, got ${#filtered_args[@]}" >&2
+    log_error "Usage: $0 <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] [--auto-approve]" >&2
+    exit 1
+fi
 
-# Interactive prompts for APP_NAME and ROLE_NAME if not provided
-if [ -z "$APP_NAME" ] && [ ${#filtered_args[@]} -le 1 ]; then
+# Assign mandatory parameters first (positions 0-4)
+SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-${filtered_args[0]}}"
+BACKEND_URL="${BACKEND_URL:-${filtered_args[1]}}"
+BEARER_TOKEN="${BEARER_TOKEN:-${filtered_args[2]}}"
+INSTALLATION_ID="${INSTALLATION_ID:-${filtered_args[3]}}"
+ATTEMPT_ID="${ATTEMPT_ID:-${filtered_args[4]}}"
+
+# Interactive prompts for APP_NAME and ROLE_NAME if not provided (positions 5-6)
+if [ -z "$APP_NAME" ] && [ ${#filtered_args[@]} -le 5 ]; then
     default_app_name="SaltAppServicePrincipal"
     echo -n "Enter APP_NAME (default: $default_app_name): "
     read user_app_name
     APP_NAME="${user_app_name:-$default_app_name}"
 else
-    APP_NAME="${APP_NAME:-${filtered_args[1]:-SaltAppServicePrincipal}}"
+    APP_NAME="${APP_NAME:-${filtered_args[5]:-SaltAppServicePrincipal}}"
 fi
 
-if [ -z "$ROLE_NAME" ] && [ ${#filtered_args[@]} -le 2 ]; then
+if [ -z "$ROLE_NAME" ] && [ ${#filtered_args[@]} -le 6 ]; then
     default_role_name="SaltCustomAppRole"
     echo -n "Enter ROLE_NAME (default: $default_role_name): "
     read user_role_name
     ROLE_NAME="${user_role_name:-$default_role_name}"
 else
-    ROLE_NAME="${ROLE_NAME:-${filtered_args[2]:-SaltCustomAppRole}}"
+    ROLE_NAME="${ROLE_NAME:-${filtered_args[6]:-SaltCustomAppRole}}"
 fi
 
-BACKEND_URL="${BACKEND_URL:-${filtered_args[3]:-https://api-eladb.dod.dnssf.com/v1/cloud-connect/scan/azure}}"
-BEARER_TOKEN="${BEARER_TOKEN:-${filtered_args[4]:-qjtZkKapKC0QG3i9Pcaoh2wqga9UHIfZeGJwo1yLNN5YY4OjNmza0VLwRUDQTLXl}}"
-CREATED_BY="${CREATED_BY:-${filtered_args[5]:-Elad Ben Arie}}"
-INSTALLATION_ID="${INSTALLATION_ID:-${filtered_args[6]:-f47ac10b-58cc-4372-a567-0e02b2c3d479}}"
-ATTEMPT_ID="${ATTEMPT_ID:-${filtered_args[7]:-6ba7b810-9dad-11d1-80b4-00c04fd430c8}}"
+CREATED_BY="${CREATED_BY:-${filtered_args[7]:-Salt Security}}"
 
 log_info ""
 log_info "╔══════════════════════════════════════════════════════════════════════════════════╗" "${BLUE}${BOLD}"
@@ -421,11 +570,11 @@ log_info "Resources will be tagged with: $resource_tag" "${CYAN}${BOLD}"
 log_info "Resource names will include nonce: ${nonce}" "${CYAN}${BOLD}"
 log_info ""
 
-# Check Azure CLI authentication before starting deployment
-check_azure_auth
-
 # Validate input parameters
 validate_inputs
+
+# Check Azure CLI authentication before starting deployment
+check_azure_auth
 
 # Send initial "Initiated" status to backend
 send_backend_status "Initiated" ""
@@ -646,49 +795,15 @@ if [ "$error_occurred" = true ]; then
     log_error "Error: $error_message"
 else
     log_info "=== Service Principal Setup Complete ===" "${YELLOW}${BOLD}"
-    log_info "Subscription ID: $SUBSCRIPTION_ID" "${GREEN}"
-    log_info "Application ID (Client ID): $app_id" "${GREEN}"
-    log_info "Tenant ID: $tenant_id" "${GREEN}"
-    log_info "Service Principal Object ID: $sp_object_id" "${GREEN}"
-    log_info "Custom Role ID: $role_definition_id" "${GREEN}"
-    log_info "Client Secret: $client_secret" "${RED}"
+    log_info "Subscription ID: $SUBSCRIPTION_ID"
+    log_info "Application ID (Client ID): $app_id"
+    log_info "Tenant ID: $tenant_id"
+    log_info "Service Principal Object ID: $sp_object_id"
+    log_info "Custom Role ID: $role_definition_id"
+    log_info "Client Secret: $client_secret" "${MAGENTA}"
     log_warning "Save these values securely - the client secret cannot be retrieved again!"
     log_info ""
 fi
-
-log_info ""
-# Create JSON output for ARM template
-if [ -n "$AZ_SCRIPTS_OUTPUT_PATH" ]; then
-    log_info "Creating ARM template output..." "${CYAN}"
-
-    result=$(jq -n \
-      --arg applicationId "$app_id" \
-      --arg tenantId "$tenant_id" \
-      --arg clientSecret "$client_secret" \
-      --arg servicePrincipalObjectId "$sp_object_id" \
-      --arg customRoleId "$role_definition_id" \
-      --arg subscriptionId "$SUBSCRIPTION_ID" \
-      --argjson backendSent "$backend_sent" \
-      --argjson error "$error_occurred" \
-      --arg errorMessage "$error_message" \
-      '{
-        applicationId: $applicationId,
-        tenantId: $tenantId,
-        clientSecret: $clientSecret,
-        servicePrincipalObjectId: $servicePrincipalObjectId,
-        customRoleId: $customRoleId,
-        subscriptionId: $subscriptionId,
-        backendSent: $backendSent,
-        error: $error,
-        errorMessage: $errorMessage
-      }')
-
-    echo "$result" > "$AZ_SCRIPTS_OUTPUT_PATH"
-    log_info "ARM template output created" "${GREEN}"
-else
-    log_info "No ARM template output path found (running outside deployment script)" "${YELLOW}"
-fi
-log_info ""
 
 # Log script completion
 if [ "$error_occurred" = true ]; then

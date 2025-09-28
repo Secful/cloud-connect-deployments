@@ -20,16 +20,37 @@ This manual test plan is derived from the comprehensive automated test suite in 
 - [ ] Test Azure subscription access
 - [ ] Sufficient permissions for creating Azure AD apps, service principals, and custom roles
 
-### Environment Variables
+### Script Usage
+The script accepts parameters in this order:
+```bash
+./azure-deployment-script.sh <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] --auto-approve
+```
+
+### Environment Variables (Recommended Approach)
 For consistent testing, set these environment variables:
 
 ```bash
 export SUBSCRIPTION_ID="your-test-subscription-id"
-export APP_NAME="ManualTestApp"
-export ROLE_NAME="ManualTestRole"
-export BACKEND_URL="https://api.test.com/webhook"  # Optional
-export BEARER_TOKEN="test-token-123"              # Optional
-export CREATED_BY="Manual Test User"              # Optional
+export BACKEND_URL="https://api.test.com/webhook"  # Required
+export BEARER_TOKEN="test-token-123"              # Required
+export INSTALLATION_ID="$(uuidgen)"               # Required
+export ATTEMPT_ID="$(uuidgen)"                    # Required
+export APP_NAME="ManualTestApp"                   # Optional (has interactive prompt with default)
+export ROLE_NAME="ManualTestRole"                 # Optional (has interactive prompt with default)
+export CREATED_BY="Manual Test User"              # Optional (has default)
+```
+
+### Command Line Examples
+```bash
+# Using environment variables (recommended):
+./azure-deployment-script.sh --auto-approve
+
+# Using command line parameters:
+./azure-deployment-script.sh "subscription-id" "https://api.test.com" "bearer-token" "$(uuidgen)" "$(uuidgen)" --auto-approve
+
+# Mixed approach (mandatory params on command line, optional via environment):
+export APP_NAME="MyTestApp"
+./azure-deployment-script.sh "subscription-id" "https://api.test.com" "bearer-token" "$(uuidgen)" "$(uuidgen)" --auto-approve
 ```
 
 ## Test Categories and Scenarios
@@ -93,7 +114,7 @@ export CREATED_BY="Manual Test User"              # Optional
 
 ### 2. Input Validation Tests
 
-#### INP-001: Invalid Subscription ID Format
+#### INP-001: Invalid Subscription ID Format ✅
 **Objective**: Test subscription ID validation.
 
 **Test Cases**:
@@ -114,7 +135,7 @@ export SUBSCRIPTION_ID=""
 - Error: "Invalid subscription ID format"
 - No authentication attempts
 
-#### INP-002: Invalid Application Name
+#### INP-002: Invalid Application Name ✅
 **Objective**: Test application name validation.
 
 **Test Cases**:
@@ -131,14 +152,14 @@ export APP_NAME="App|With|Pipes"
 - Clear error message about invalid app name format
 - No Azure resources created
 
-#### INP-003: Invalid Role Name
+#### INP-003: Invalid Role Name ✅
 **Objective**: Test custom role name validation.
 
 **Test Cases**:
 ```bash
 # Test invalid role names:
 export ROLE_NAME=""
-export ROLE_NAME="Role Name With Spaces"  
+export ROLE_NAME="Role Name With Spaces"
 export ROLE_NAME="Role@Invalid!Characters"
 ```
 
@@ -146,6 +167,72 @@ export ROLE_NAME="Role@Invalid!Characters"
 - Validation error before resource creation
 - Clear error message about role name format
 - Script exits cleanly
+
+#### INP-004: Missing Required Parameters ✅
+**Objective**: Test validation of all mandatory parameters.
+
+**Test Cases**:
+```bash
+# Test missing backend URL:
+unset BACKEND_URL
+./azure-deployment-script.sh --auto-approve
+
+# Test missing bearer token:
+export BACKEND_URL="https://api.test.com/webhook"
+unset BEARER_TOKEN
+./azure-deployment-script.sh --auto-approve
+
+# Test missing installation ID:
+export BEARER_TOKEN="test-token"
+unset INSTALLATION_ID
+./azure-deployment-script.sh --auto-approve
+
+# Test missing attempt ID:
+export INSTALLATION_ID="$(uuidgen)"
+unset ATTEMPT_ID
+./azure-deployment-script.sh --auto-approve
+```
+
+**Expected Results**:
+- Script exits with validation error for each missing parameter
+- Error: "Missing required param: [parameter_name]"
+- No authentication or resource creation attempts
+
+#### INP-005: Invalid Backend URL Format ✅
+**Objective**: Test backend URL validation.
+
+**Test Cases**:
+```bash
+# Test invalid URL formats:
+export BACKEND_URL="invalid-url"
+export BACKEND_URL="ftp://invalid.protocol.com"
+export BACKEND_URL="api.test.com"  # Missing protocol
+```
+
+**Expected Results**:
+- Script exits with validation error
+- Error: "Invalid backend URL format"
+- Error: "Backend URL must start with http:// or https://"
+
+#### INP-006: Invalid UUID Format ✅
+**Objective**: Test UUID validation for installation and attempt IDs.
+
+**Test Cases**:
+```bash
+# Test invalid installation ID:
+export INSTALLATION_ID="invalid-uuid"
+./azure-deployment-script.sh --auto-approve
+
+# Test invalid attempt ID:
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="12345-invalid"
+./azure-deployment-script.sh --auto-approve
+```
+
+**Expected Results**:
+- Script exits with validation error
+- Error: "Invalid installation ID format" or "Invalid attempt ID format"
+- Expected format message displayed
 
 ### 3. Authentication & Permissions Tests
 
@@ -162,7 +249,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 - Clear error messages about insufficient permissions
 - Partial resources may be created (verify cleanup)
 
-#### AUTH-002: Invalid Subscription ID
+#### AUTH-002: Invalid Subscription ID ✅
 **Objective**: Test with non-existent subscription.
 
 **Steps**:
@@ -177,16 +264,18 @@ export ROLE_NAME="Role@Invalid!Characters"
 
 ### 4. Resource Creation Tests
 
-#### RES-001: Successful Full Deployment (Happy Path)
+#### RES-001: Successful Full Deployment (Happy Path) ✅
 **Objective**: Test complete successful deployment workflow.
 
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export APP_NAME="TestSuccessApp"
-export ROLE_NAME="TestSuccessRole"
 export BACKEND_URL="https://httpbin.org/post"  # Test endpoint
 export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="TestSuccessApp"
+export ROLE_NAME="TestSuccessRole"
 ```
 
 **Steps**:
@@ -197,15 +286,15 @@ export BEARER_TOKEN="test-valid-token"
 **Expected Results**:
 - Script exits with code 0
 - All phases complete successfully:
-  - ✅ Azure authentication setup
-  - ✅ Creating Azure AD application
-  - ✅ Creating client secret
-  - ✅ Creating service principal
-  - ✅ Retrieving tenant ID
-  - ✅ Creating custom role
-  - ✅ Assigning custom role
-  - ✅ Service principal verification
-  - ✅ Backend status updates (if configured)
+  - Azure authentication setup
+  - Creating Azure AD application
+  - Creating client secret
+  - Creating service principal
+  - Retrieving tenant ID
+  - Creating custom role
+  - Assigning custom role
+  - Service principal verification
+  - Backend status updates (if configured)
 
 **Output Verification**:
 - Application ID displayed
@@ -223,42 +312,74 @@ az ad sp list --display-name "TestSuccessApp"
 az role definition list --name "TestSuccessRole" --custom-role-only
 ```
 
-#### RES-002: Duplicate Application Name
-**Objective**: Test handling of existing application names.
+#### RES-002: Resource Name Uniqueness Verification ✅
+**Objective**: Verify that resources are created with unique names using nonce suffixes.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="TestApp"
+export ROLE_NAME="TestRole"
+```
 
 **Steps**:
-1. Create an application: `az ad app create --display-name "DuplicateTestApp"`
-2. Set: `export APP_NAME="DuplicateTestApp"`
-3. Run the script
-4. Observe conflict handling
+1. Run the script first time: `./azure-deployment-script.sh --auto-approve`
+2. Note the nonce used in resource names (from output or log)
+3. Run the script second time: `./azure-deployment-script.sh --auto-approve`
+4. Verify both deployments succeed without conflicts
 
 **Expected Results**:
-- Script detects existing application
-- Either fails gracefully with clear error OR continues with existing app (depending on implementation)
-- No duplicate resources created
+- First run creates resources with names like `TestApp-a1b2c3d4`, `TestRole-a1b2c3d4`
+- Second run creates resources with different nonce like `TestApp-e5f6g7h8`, `TestRole-e5f6g7h8`
+- Both deployments succeed independently
+- No name conflicts occur
+- Each deployment uses a unique 8-character hex nonce
 
-#### RES-003: Partial Failure Scenario
+#### RES-003: Partial Failure Scenario ✅
 **Objective**: Test cleanup when deployment fails mid-process.
 
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="TestApp"
+export ROLE_NAME="TestRole"
+```
+
 **Steps**:
-1. Set valid parameters
-2. Run script and interrupt during service principal creation (Ctrl+C)
-3. Verify partial cleanup occurs
-4. Check for orphaned resources
+1. Run script and interrupt during service principal creation (Ctrl+C)
+2. Verify partial cleanup occurs
+3. Check for orphaned resources
 
 **Expected Results**:
 - Script handles interrupt signal
 - Cleanup process executes
 - Partial resources are cleaned up
-- Clear messages about cleanup actions
+- Appropriate cleanup message: "Successfully deleted the created resources" or "Cleanup completed (no Azure resources were created)"
 
 ### 5. Error Handling & Cleanup Tests
 
-#### ERR-001: SIGINT Cleanup (Ctrl+C)
+#### ERR-001: SIGINT Cleanup (Ctrl+C) ✅
 **Objective**: Test cleanup behavior when interrupted.
 
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
 **Steps**:
-1. Start deployment with valid parameters
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
 2. Press Ctrl+C after application creation starts
 3. Verify cleanup behavior
 
@@ -266,7 +387,8 @@ az role definition list --name "TestSuccessRole" --custom-role-only
 - Script catches SIGINT signal
 - Displays "Received interrupt signal" message
 - Executes cleanup routine
-- Deletes created resources
+- Deletes created resources (if any were created)
+- Shows appropriate cleanup completion message
 - Exits with code 130
 
 **Verification**:
@@ -277,11 +399,20 @@ az ad sp list --display-name "TestApp"
 az role definition list --name "TestRole" --custom-role-only
 ```
 
-#### ERR-002: Service Principal Verification Timeout
+#### ERR-002: Service Principal Verification Timeout ✅
 **Objective**: Test timeout handling during SP verification.
 
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
 **Steps**:
-1. Use parameters that may cause slow SP propagation
+1. Run the script: `./azure-deployment-script.sh --auto-approve`
 2. Monitor the service principal verification phase
 3. Check timeout handling (if SP takes too long to be ready)
 
@@ -320,8 +451,11 @@ export ATTEMPT_ID="$(uuidgen)"
 
 **Setup**:
 ```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
 export BACKEND_URL="https://nonexistent.invalid.domain/webhook"
 export BEARER_TOKEN="test-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
@@ -341,12 +475,30 @@ export BEARER_TOKEN="test-token"
 ```bash
 export BACKEND_URL="https://httpbin.org/status/401"  # Returns 401
 export BEARER_TOKEN="invalid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Expected Results**:
 - Backend returns authentication error
 - Script logs warning but continues
 - Azure deployment still completes successfully
+
+#### BCK-004: Empty Bearer Token
+**Objective**: Test validation when bearer token is empty.
+
+**Setup**:
+```bash
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN=""
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
+**Expected Results**:
+- Script exits during validation phase
+- Error: "Missing required param: bearer token"
+- No Azure resource creation attempts
 
 ### 7. Edge Cases and Boundary Tests
 
@@ -402,6 +554,9 @@ Use this checklist to track test execution:
 - [ ] INP-001: Invalid subscription ID format
 - [ ] INP-002: Invalid application name
 - [ ] INP-003: Invalid role name
+- [ ] INP-004: Missing required parameters
+- [ ] INP-005: Invalid backend URL format
+- [ ] INP-006: Invalid UUID format
 
 ### Authentication Tests  
 - [ ] AUTH-001: Insufficient permissions
@@ -409,7 +564,7 @@ Use this checklist to track test execution:
 
 ### Resource Creation Tests
 - [ ] RES-001: Successful full deployment
-- [ ] RES-002: Duplicate application name
+- [ ] RES-002: Resource name uniqueness verification
 - [ ] RES-003: Partial failure scenario
 
 ### Error Handling Tests
@@ -420,6 +575,7 @@ Use this checklist to track test execution:
 - [ ] BCK-001: Successful backend communication
 - [ ] BCK-002: Backend URL unreachable  
 - [ ] BCK-003: Invalid bearer token
+- [ ] BCK-004: Empty bearer token
 
 ### Edge Case Tests
 - [ ] EDGE-001: Very long resource names
@@ -461,6 +617,22 @@ Use this checklist to track test execution:
     "",
     "Role Name With Spaces",
     "Role@Invalid!Characters"
+  ],
+  "invalid_backend_urls": [
+    "",
+    "invalid-url",
+    "ftp://invalid.protocol.com",
+    "api.test.com"
+  ],
+  "invalid_uuids": [
+    "invalid-uuid",
+    "12345-invalid",
+    "",
+    "550e8400-e29b-41d4-a716",
+    "550e8400xe29bx41d4xa716x446655440000"
+  ],
+  "invalid_bearer_tokens": [
+    ""
   ]
 }
 ```
@@ -561,5 +733,6 @@ az account set --subscription "your-test-subscription-id"
 
 **Test Plan Version**: 1.0  
 **Last Updated**: 2025-01-09  
+**Script Version**: Updated parameter order - mandatory parameters first (subscription_id, backend_url, bearer_token, installation_id, attempt_id), then optional parameters (app_name, role_name, created_by)  
 **Based on Automated Tests**: azure/tests/ directory  
 **Estimated Execution Time**: 4-6 hours for full test suite
