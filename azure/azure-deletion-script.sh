@@ -159,10 +159,13 @@ send_backend_deletion() {
     
     log_info "Sending deletion notification to backend: $deletion_status" "${CYAN}${BOLD}"
     
+    # Construct backend URL with subscription ID suffix
+    backend_url_with_subscription="${BACKEND_URL}/${SUBSCRIPTION_ID}"
+    
     # Send DELETE request to backend (no body required)
     if response=$(curl -s -w "\\n%{http_code}" -X DELETE \
         -H "Authorization: Bearer $BEARER_TOKEN" \
-        "$BACKEND_URL" 2>&1); then
+        "$backend_url_with_subscription" 2>&1); then
 
         http_code=$(echo "$response" | tail -n 1)
         response_body=$(echo "$response" | sed '$d')
@@ -458,8 +461,9 @@ done
 # Parameters - Get subscription ID and nonce from command line or environment
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-${filtered_args[0]}}"
 NONCE="${NONCE:-${filtered_args[1]}}"
-BACKEND_URL="${BACKEND_URL:-${filtered_args[2]}}"
+BACKEND_URL="${BACKEND_URL:-${filtered_args[2]:-https://api-eladb.dod.dnssf.com/v1/cloud-connect/organizations/accounts/azure}}"
 BEARER_TOKEN="${BEARER_TOKEN:-${filtered_args[3]}}"
+CREATED_BY="${CREATED_BY:-${filtered_args[4]:-Elad Ben Arie}}"
 
 # Check if required parameters are provided (before logging starts, only display errors)
 if [ -z "$SUBSCRIPTION_ID" ]; then
