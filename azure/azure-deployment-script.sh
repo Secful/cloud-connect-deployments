@@ -129,7 +129,7 @@ cleanup() {
                             fi
                         done
                     else
-                        log_info "No role assignments found (this is normal)" "${GREEN}"
+                        log_info "No role assignments between service principal and custom role found - nothing to clean up" "${GREEN}"
                     fi
                 else
                     log_warning "Could not check for role assignments"
@@ -137,14 +137,14 @@ cleanup() {
             fi
         fi
         
-        # Step 2: Delete custom role definition (now that assignments are gone)
+        # Step 2: Delete custom role (now that assignments are gone)
         log_info "Checking if custom role exists: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
         if [ -n "$role_definition_id" ]; then
-            log_info "Found! Deleting custom role definition..." "${YELLOW}"
+            log_info "Found! Deleting custom role..." "${YELLOW}"
             if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
-                log_info "Custom role definition deleted successfully" "${GREEN}"
+                log_info "✅ Custom role deleted successfully" "${GREEN}"
             else
-                log_warning "Custom role definition deletion failed: $role_delete_result"
+                log_warning "Custom role deletion failed: $role_delete_result"
             fi
         elif [ -n "$ROLE_NAME_WITH_NONCE" ]; then
             # Fallback: check if role exists by name and delete it (handles race conditions)
@@ -153,21 +153,21 @@ cleanup() {
                 if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                     role_definition_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                     if [ -n "$role_definition_id" ] && [ "$role_definition_id" != "null" ]; then
-                        log_info "Found! Deleting custom role definition..." "${YELLOW}"
+                        log_info "Found! Deleting custom role..." "${YELLOW}"
                         log_info "Role ID: $role_definition_id" "${YELLOW}"
                         if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
-                            log_info "Role deleted successfully" "${GREEN}"
+                            log_info "✅ Custom role deleted successfully" "${GREEN}"
                         else
-                            log_warning "Role deletion failed: $delete_result"
+                            log_warning "Custom role deletion failed: $delete_result"
                         fi
                     else
-                        log_info "Role found in list but could not extract ID" "${YELLOW}"
+                        log_info "Custom role found in list but could not extract ID" "${YELLOW}"
                     fi
                 else
-                    log_info "Role not found in role definition list - skipping role cleanup" "${YELLOW}"
+                    log_info "Role not found in custom roles list - skipping role cleanup" "${YELLOW}"
                 fi
             else
-                log_info "Failed to list role definitions. CLI result: $role_list_result" "${YELLOW}"
+                log_info "Failed to list custom roles. CLI result: $role_list_result" "${YELLOW}"
                 log_info "This might be due to Azure propagation delays or subscription context issues" "${YELLOW}"
             fi
         else
@@ -180,7 +180,7 @@ cleanup() {
         if [ -n "$sp_object_id" ]; then
             log_info "Found! Deleting service principal..." "${YELLOW}"
             if sp_delete_result=$(az ad sp delete --id "$sp_object_id" 2>&1); then
-                log_info "Service principal deleted successfully" "${GREEN}"
+                log_info "✅ Service principal deleted successfully" "${GREEN}"
             else
                 log_warning "Service principal deletion failed: $sp_delete_result"
             fi
@@ -194,7 +194,7 @@ cleanup() {
         if [ -n "$app_id" ]; then
             log_info "Found! Deleting Azure AD application (and client secret)..." "${YELLOW}"
             if app_delete_result=$(az ad app delete --id "$app_id" 2>&1); then
-                log_info "Azure AD application deleted successfully" "${GREEN}"
+                log_info "✅ Azure AD application deleted successfully" "${GREEN}"
             else
                 log_warning "Azure AD application deletion failed: $app_delete_result"
             fi
@@ -430,20 +430,20 @@ verify_sp_ready() {
         log_info "Testing service principal authentication (attempt $attempt/$max_attempts)..." "${YELLOW}"
         
         if az login --service-principal -u "$app_id" -p "$client_secret" --tenant "$tenant_id" >/dev/null 2>&1; then
-            log_info "✅ Service principal is ready for authentication" "${GREEN}"
+            log_info "Service principal is ready for authentication" "${GREEN}"
             log_info ""
             az logout >/dev/null 2>&1
             return 0
         fi
         
         if [ $attempt -lt $max_attempts ]; then
-            log_info "⏳ Service principal not ready yet, waiting 30 seconds..." "${YELLOW}"
+            log_info "Service principal not ready yet, waiting 30 seconds..." "${YELLOW}"
             sleep 30
         fi
         ((attempt++))
     done
     
-    log_error "❌ Service principal authentication failed after $max_attempts attempts"
+    log_error "Service principal authentication failed after $max_attempts attempts"
     return 1
 }
 
@@ -577,43 +577,46 @@ validate_inputs
 check_azure_auth
 
 # Send initial "Initiated" status to backend
-send_backend_status "Initiated" ""
-
-log_info ""
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info "                    AZURE AD APPLICATION SETUP" "${MAGENTA}${BOLD}"
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info ""
+if ! send_backend_status "Initiated" ""; then
+    handle_error "Failed to notify backend of deployment initiation"
+fi
 
 # 1. Create Azure AD Application
-log_info "Creating Azure AD application (app registration): $APP_NAME_WITH_NONCE" "${CYAN}${BOLD}"
+if [ "$error_occurred" = false ]; then
+    log_info ""
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info "                    AZURE AD APPLICATION SETUP" "${MAGENTA}${BOLD}"
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info ""
+    log_info "Creating Azure AD application (app registration): $APP_NAME_WITH_NONCE" "${CYAN}${BOLD}"
 
-# Check if app already exists (should be rare with nonce, but check anyway)
-if existing_app=$(az ad app list --display-name "$APP_NAME_WITH_NONCE" --query "[0]" 2>/dev/null) && [ "$existing_app" != "null" ] && [ -n "$existing_app" ]; then
-    existing_app_id=$(echo "$existing_app" | jq -r '.appId')
-    handle_error "Application '$APP_NAME_WITH_NONCE' already exists (ID: $existing_app_id). Please choose a different name or delete the existing application first."
-elif app_result=$(az ad app create --display-name "$APP_NAME_WITH_NONCE" --sign-in-audience AzureADMyOrg 2>&1); then
-    # Extract JSON part (skip any WARNING lines)
-    json_part=$(echo "$app_result" | sed -n '/^{/,$p')
-    if echo "$json_part" | jq . >/dev/null 2>&1; then
-        app_id=$(echo "$json_part" | jq -r '.appId')
-        app_object_id=$(echo "$json_part" | jq -r '.id')
-        log_info "Application created - App ID: $app_id" "${GREEN}"
-        
-        # Tag the application
-        log_info "Tagging application with: $resource_tag" "${CYAN}"
-        if az ad app update --id "$app_id" --set tags="[\"$resource_tag\"]" >/dev/null 2>&1; then
-            log_info "✅ Application tagged successfully" "${GREEN}"
-            log_info ""
+    # Check if app already exists (should be rare with nonce, but check anyway)
+    if existing_app=$(az ad app list --display-name "$APP_NAME_WITH_NONCE" --query "[0]" 2>/dev/null) && [ "$existing_app" != "null" ] && [ -n "$existing_app" ]; then
+        existing_app_id=$(echo "$existing_app" | jq -r '.appId')
+        handle_error "Application '$APP_NAME_WITH_NONCE' already exists (ID: $existing_app_id). Please choose a different name or delete the existing application first."
+    elif app_result=$(az ad app create --display-name "$APP_NAME_WITH_NONCE" --sign-in-audience AzureADMyOrg 2>&1); then
+        # Extract JSON part (skip any WARNING lines)
+        json_part=$(echo "$app_result" | sed -n '/^{/,$p')
+        if echo "$json_part" | jq . >/dev/null 2>&1; then
+            app_id=$(echo "$json_part" | jq -r '.appId')
+            app_object_id=$(echo "$json_part" | jq -r '.id')
+            log_info "Application created - App ID: $app_id" "${GREEN}"
+            
+            # Tag the application
+            log_info "Tagging application with: $resource_tag" "${CYAN}"
+            if az ad app update --id "$app_id" --set tags="[\"$resource_tag\"]" >/dev/null 2>&1; then
+                log_info "✅ Application tagged successfully" "${GREEN}"
+                log_info ""
+            else
+                log_warning "⚠️ Failed to tag application (non-critical)"
+                log_info ""
+            fi
         else
-            log_warning "⚠️ Failed to tag application (non-critical)"
-            log_info ""
+            handle_error "Failed to parse application creation result: $app_result"
         fi
     else
-        handle_error "Failed to parse application creation result: $app_result"
+        handle_error "Failed to create Azure AD application: $app_result"
     fi
-else
-    handle_error "Failed to create Azure AD application: $app_result"
 fi
 
 # 2. Create client secret
@@ -624,7 +627,7 @@ if [ "$error_occurred" = false ]; then
         json_part=$(echo "$secret_result" | sed -n '/^{/,$p')
         if echo "$json_part" | jq . >/dev/null 2>&1; then
             client_secret=$(echo "$json_part" | jq -r '.password')
-            log_info "Client secret created" "${GREEN}"
+            log_info "✅ Client secret created successfully" "${GREEN}"
         else
             handle_error "Failed to parse client secret result: $secret_result"
         fi
@@ -633,14 +636,13 @@ if [ "$error_occurred" = false ]; then
     fi
 fi
 
-log_info ""
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info "                    SERVICE PRINCIPAL CREATION" "${MAGENTA}${BOLD}"
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info ""
-
 # 3. Create service principal
 if [ "$error_occurred" = false ]; then
+    log_info ""
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info "                    SERVICE PRINCIPAL CREATION" "${MAGENTA}${BOLD}"
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info ""
     log_info "Creating service principal..." "${CYAN}${BOLD}"
     
     # Check if service principal already exists for this app
@@ -652,7 +654,7 @@ if [ "$error_occurred" = false ]; then
         json_part=$(echo "$sp_result" | sed -n '/^{/,$p')
         if echo "$json_part" | jq . >/dev/null 2>&1; then
             sp_object_id=$(echo "$json_part" | jq -r '.id')
-            log_info "Service principal created - Object ID: $sp_object_id" "${GREEN}"
+            log_info "✅ Service principal created successfully - Object ID: $sp_object_id" "${GREEN}"
             
             # Tag the service principal
             log_info "Tagging service principal with: $resource_tag" "${CYAN}"
@@ -681,14 +683,13 @@ if [ "$error_occurred" = false ]; then
     fi
 fi
 
-log_info ""
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info "                    PERMISSION CONFIGURATION" "${MAGENTA}${BOLD}"
-log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
-log_info ""
-
-# 5. Create custom role definition
+# 5. Create custom role
 if [ "$error_occurred" = false ]; then
+    log_info ""
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info "                    PERMISSION CONFIGURATION" "${MAGENTA}${BOLD}"
+    log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+    log_info ""
     log_info "Creating custom role: $ROLE_NAME_WITH_NONCE" "${CYAN}${BOLD}"
     
     # Check if role already exists (should be rare with nonce, but check anyway)
@@ -720,7 +721,7 @@ EOF
             json_part=$(echo "$role_result" | sed -n '/^{/,$p')
             if echo "$json_part" | jq . >/dev/null 2>&1; then
                 role_definition_id=$(echo "$json_part" | jq -r '.id')
-                log_info "Custom role created - Role ID: $role_definition_id" "${GREEN}"
+                log_info "✅ Custom role created - Role ID: $role_definition_id" "${GREEN}"
                 log_info ""
             else
                 handle_error "Failed to parse role creation result: $role_result"
@@ -742,7 +743,7 @@ if [ "$error_occurred" = false ]; then
           --assignee "$sp_object_id" \
           --role "$role_definition_id" \
           --scope "/subscriptions/$SUBSCRIPTION_ID" >/dev/null 2>&1; then
-            log_info "Role assignment created" "${GREEN}"
+            log_info "✅ Role assignment created" "${GREEN}"
             log_info ""
             break
         else
@@ -766,20 +767,30 @@ log_info ""
 
 # Send final deployment status to backend
 if [ "$error_occurred" = true ]; then
-    send_backend_status "Failed" "$error_message"
+    if ! send_backend_status "Failed" "$error_message"; then
+        error_message="$error_message (also failed to notify backend with status=Failed)"
+    fi
 else
     # Verify service principal is ready for authentication (if all resources created successfully)
     if [ -n "$app_id" ] && [ -n "$client_secret" ] && [ -n "$tenant_id" ]; then
         if ! verify_sp_ready; then
             handle_error "Service principal verification failed"
-            send_backend_status "Failed" "$error_message"
+            if ! send_backend_status "Failed" "$error_message"; then
+                error_message="$error_message (also failed to notify backend with status=Failed)"
+            fi
         elif [ -n "$sp_object_id" ]; then
-            send_backend_status "Succeeded" ""
+            if ! send_backend_status "Succeeded" ""; then
+                handle_error "Deployment succeeded but failed to notify backend with status=Succeeded"
+            fi
         else
-            send_backend_status "Unknown" "Deployment completed but some resources may not have been created properly"
+            if ! send_backend_status "Unknown" "Deployment completed but some resources may not have been created properly"; then
+                handle_error "Deployment status unknown and failed to notify backend"
+            fi
         fi
     else
-        send_backend_status "Unknown" "Deployment completed but some resources may not have been created properly"
+        if ! send_backend_status "Unknown" "Deployment completed but some resources may not have been created properly"; then
+            handle_error "Deployment status unknown and failed to notify backend"
+        fi
     fi
 fi
 
@@ -809,7 +820,7 @@ fi
 if [ "$error_occurred" = true ]; then
     log_error "Script completed with errors. Check the log file: $LOG_FILE"
 else
-    log_info "Script completed successfully. Log file: $LOG_FILE" "${GREEN}"
+    log_info "✅ Script completed successfully. Log file: $LOG_FILE" "${GREEN}"
 fi
 
 # Exit with error code if deployment failed
