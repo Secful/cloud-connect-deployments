@@ -263,12 +263,6 @@ validate_uuid() {
     local var_name="$1"
     local var_value="$2"
     
-    # Check if value is empty
-    if [ -z "$var_value" ]; then
-        log_error "Missing required param: $var_name" >&2
-        exit 1
-    fi
-    
     if [[ ! "$var_value" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
         log_error "Invalid $var_name format: $var_value" >&2
         log_error "Expected UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" >&2
@@ -281,12 +275,6 @@ validate_name() {
     local var_name="$1"
     local var_value="$2"
     
-    # Check if value is empty
-    if [ -z "$var_value" ]; then
-        log_error "Missing required param: $var_name" >&2
-        exit 1
-    fi
-    
     if [[ ! "$var_value" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$var_value" =~ [[:space:]] ]]; then
         log_error "Invalid $var_name format: $var_value" >&2
         log_error "$var_name should only contain letters, numbers, hyphens, and underscores" >&2
@@ -294,16 +282,10 @@ validate_name() {
     fi
 }
 
-# Helper function to validate URL format (optional parameter)
+# Helper function to validate URL format
 validate_url() {
     local var_name="$1"
     local var_value="$2"
-    
-    # Check if value is empty
-    if [ -z "$var_value" ]; then
-        log_error "Missing required param: $var_name" >&2
-        exit 1
-    fi
     
     if [[ ! "$var_value" =~ ^https?:// ]]; then
         log_error "Invalid $var_name format: $var_value" >&2
@@ -324,11 +306,7 @@ validate_inputs() {
     # Position 1: Backend URL format
     validate_url "backend URL" "$BACKEND_URL"
     
-    # Position 2: Bearer token (required)
-    if [ -z "$BEARER_TOKEN" ]; then
-        log_error "Missing required param: BEARER_TOKEN" >&2
-        exit 1
-    fi
+    # Position 2: Bearer token (no format validation needed)
     
     # Position 3: Installation ID (UUID format)
     validate_uuid "installation ID" "$INSTALLATION_ID"
@@ -478,12 +456,20 @@ for arg in "$@"; do
     esac
 done
 
-# Check if we have enough mandatory parameters
+# Check if we have enough mandatory parameters and none are empty
 if [ ${#filtered_args[@]} -lt 5 ]; then
     log_error "Missing required parameters. Expected 5 mandatory parameters, got ${#filtered_args[@]}" >&2
     log_error "Usage: $0 <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] [--auto-approve]" >&2
     exit 1
 fi
+
+for i in {0..4}; do
+    if [ -z "${filtered_args[i]}" ]; then
+        log_error "Parameter $((i+1)) is empty. All mandatory parameters must have values." >&2
+        log_error "Usage: $0 <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] [--auto-approve]" >&2
+        exit 1
+    fi
+done
 
 # Assign mandatory parameters first (positions 0-4)
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-${filtered_args[0]}}"
