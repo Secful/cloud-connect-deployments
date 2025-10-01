@@ -84,8 +84,18 @@ check_dependencies() {
 cleanup() {
     local exit_code=$?
     
+    # Determine if cleanup is due to error or interruption for color coding
+    local is_interrupt=false
+    if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+        is_interrupt=true
+    fi
+    
     # Only cleanup Azure resources on failure or interruption (not on success)
     if [ $exit_code -ne 0 ] || [ "$error_occurred" = "true" ]; then
+        log_info ""
+        log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
+        log_info "                    CLEANUP - REMOVING RESOURCES" "${MAGENTA}${BOLD}"
+        log_info "══════════════════════════════════════════════════════════════" "${MAGENTA}${BOLD}"
         log_info ""
         log_warning "Deployment failed/interrupted - cleaning up created resources..."
         
@@ -122,14 +132,22 @@ cleanup() {
                             if [ -n "$assignment_id" ]; then
                                 log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
                                 if az role assignment delete --ids "$assignment_id" >/dev/null 2>&1; then
-                                    log_info "Role assignment deleted successfully" "${GREEN}"
+                                    if [ "$is_interrupt" = true ]; then
+                                        log_info "✅ Role assignment deleted successfully" "${GREEN}"
+                                    else
+                                        log_info "Role assignment deleted successfully" "${YELLOW}"
+                                    fi
                                 else
                                     log_warning "Failed to delete role assignment: $assignment_id"
                                 fi
                             fi
                         done
                     else
-                        log_info "No role assignments between service principal and custom role found - nothing to clean up" "${GREEN}"
+                        if [ "$is_interrupt" = true ]; then
+                            log_info "✅ No role assignments between service principal and custom role found - nothing to clean up" "${GREEN}"
+                        else
+                            log_info "No role assignments between service principal and custom role found - nothing to clean up" "${YELLOW}"
+                        fi
                     fi
                 else
                     log_warning "Could not check for role assignments"
@@ -142,7 +160,11 @@ cleanup() {
         if [ -n "$role_definition_id" ]; then
             log_info "Found! Deleting custom role..." "${YELLOW}"
             if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
-                log_info "✅ Custom role deleted successfully" "${GREEN}"
+                if [ "$is_interrupt" = true ]; then
+                    log_info "✅ Custom role deleted successfully" "${GREEN}"
+                else
+                    log_info "Custom role deleted successfully" "${YELLOW}"
+                fi
             else
                 log_warning "Custom role deletion failed: $role_delete_result"
             fi
@@ -156,7 +178,11 @@ cleanup() {
                         log_info "Found! Deleting custom role..." "${YELLOW}"
                         log_info "Role ID: $role_definition_id" "${YELLOW}"
                         if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
-                            log_info "✅ Custom role deleted successfully" "${GREEN}"
+                            if [ "$is_interrupt" = true ]; then
+                                log_info "✅ Custom role deleted successfully" "${GREEN}"
+                            else
+                                log_info "Custom role deleted successfully" "${YELLOW}"
+                            fi
                         else
                             log_warning "Custom role deletion failed: $delete_result"
                         fi
@@ -176,11 +202,15 @@ cleanup() {
         
         # Step 3: Delete service principal
         log_info ""
-        log_info "Checking if service principal exists..." "${YELLOW}"
+        log_info "Checking if service principal exists for app: $APP_NAME_WITH_NONCE" "${YELLOW}"
         if [ -n "$sp_object_id" ]; then
             log_info "Found! Deleting service principal..." "${YELLOW}"
             if sp_delete_result=$(az ad sp delete --id "$sp_object_id" 2>&1); then
-                log_info "✅ Service principal deleted successfully" "${GREEN}"
+                if [ "$is_interrupt" = true ]; then
+                    log_info "✅ Service principal deleted successfully" "${GREEN}"
+                else
+                    log_info "Service principal deleted successfully" "${YELLOW}"
+                fi
             else
                 log_warning "Service principal deletion failed: $sp_delete_result"
             fi
@@ -190,11 +220,15 @@ cleanup() {
         
         # Step 4: Delete Azure AD application
         log_info ""
-        log_info "Checking if Azure AD application exists..." "${YELLOW}"
+        log_info "Checking if Azure AD application exists: $APP_NAME_WITH_NONCE" "${YELLOW}"
         if [ -n "$app_id" ]; then
             log_info "Found! Deleting Azure AD application (and client secret)..." "${YELLOW}"
             if app_delete_result=$(az ad app delete --id "$app_id" 2>&1); then
-                log_info "✅ Azure AD application deleted successfully" "${GREEN}"
+                if [ "$is_interrupt" = true ]; then
+                    log_info "✅ Azure AD application deleted successfully" "${GREEN}"
+                else
+                    log_info "Azure AD application deleted successfully" "${YELLOW}"
+                fi
             else
                 log_warning "Azure AD application deletion failed: $app_delete_result"
             fi
@@ -211,9 +245,17 @@ cleanup() {
         
         # Show appropriate cleanup completion message
         if [ -n "$role_definition_id" ] || [ -n "$sp_object_id" ] || [ -n "$app_id" ]; then
-            log_info "✅ Successfully deleted the created resources" "${GREEN}"
+            if [ "$is_interrupt" = true ]; then
+                log_info "✅ Successfully deleted the created resources" "${GREEN}"
+            else
+                log_info "Successfully deleted the created resources" "${YELLOW}"
+            fi
         else
-            log_info "✅ Cleanup completed (no Azure resources were created)" "${GREEN}"
+            if [ "$is_interrupt" = true ]; then
+                log_info "✅ Cleanup completed (no Azure resources were created)" "${GREEN}"
+            else
+                log_info "Cleanup completed (no Azure resources were created)" "${YELLOW}"
+            fi
         fi
     else
         log_info ""
@@ -429,7 +471,80 @@ verify_sp_ready() {
 # MAIN SCRIPT EXECUTION
 # ============================================================================
 
-# Log script start
+# Parse command line arguments first (before any logging or initialization)
+AUTO_APPROVE=false
+
+show_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Required parameters:"
+    echo "  --subscription-id=<id>     Azure subscription ID"
+    echo "  --backend-url=<url>        Backend service URL"
+    echo "  --bearer-token=<token>     Authentication bearer token"
+    echo "  --installation-id=<id>     Installation identifier"
+    echo "  --attempt-id=<id>          Attempt identifier"
+    echo ""
+    echo "Optional parameters:"
+    echo "  --app-name=<name>          Application name (default: SaltAppServicePrincipal)"
+    echo "  --role-name=<name>         Custom role name (default: SaltCustomAppRole)"
+    echo "  --created-by=<name>        Created by identifier (default: Salt Security)"
+    echo "  --auto-approve             Skip confirmation prompts"
+    echo "  --help                     Show this help message"
+    echo ""
+    echo "Note: APP_NAME and ROLE_NAME can be provided interactively if not specified as flags"
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --subscription-id=*)
+            SUBSCRIPTION_ID="${1#*=}"
+            shift
+            ;;
+        --backend-url=*)
+            BACKEND_URL="${1#*=}"
+            shift
+            ;;
+        --bearer-token=*)
+            BEARER_TOKEN="${1#*=}"
+            shift
+            ;;
+        --installation-id=*)
+            INSTALLATION_ID="${1#*=}"
+            shift
+            ;;
+        --attempt-id=*)
+            ATTEMPT_ID="${1#*=}"
+            shift
+            ;;
+        --app-name=*)
+            APP_NAME="${1#*=}"
+            shift
+            ;;
+        --role-name=*)
+            ROLE_NAME="${1#*=}"
+            shift
+            ;;
+        --created-by=*)
+            CREATED_BY="${1#*=}"
+            shift
+            ;;
+        --auto-approve)
+            AUTO_APPROVE=true
+            shift
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Log script start (after argument parsing)
 log_info ""
 log_info "Azure Deployment Script starting..." "${GREEN}${BOLD}"
 log_info "Log file: $LOG_FILE" "${CYAN}"
@@ -438,66 +553,48 @@ log_info ""
 # Check dependencies before proceeding
 check_dependencies
 
-# Set up signal handling for cleanup
-trap cleanup EXIT
-trap 'echo -e "\n${YELLOW}Received interrupt signal, cleaning up...${NC}"; exit 130' INT TERM
+# Validate that all required parameters are provided
+missing_params=()
+if [ -z "$SUBSCRIPTION_ID" ]; then
+    missing_params+=("--subscription-id")
+fi
+if [ -z "$BACKEND_URL" ]; then
+    missing_params+=("--backend-url")
+fi
+if [ -z "$BEARER_TOKEN" ]; then
+    missing_params+=("--bearer-token")
+fi
+if [ -z "$INSTALLATION_ID" ]; then
+    missing_params+=("--installation-id")
+fi
+if [ -z "$ATTEMPT_ID" ]; then
+    missing_params+=("--attempt-id")
+fi
 
-# Check for non-interactive flag and filter arguments
-AUTO_APPROVE=false
-filtered_args=()
-for arg in "$@"; do
-    case $arg in
-        --auto-approve)
-            AUTO_APPROVE=true
-            ;;
-        *)
-            filtered_args+=("$arg")
-            ;;
-    esac
-done
-
-# Check if we have enough mandatory parameters and none are empty
-if [ ${#filtered_args[@]} -lt 5 ]; then
-    log_error "Missing required parameters. Expected 5 mandatory parameters, got ${#filtered_args[@]}" >&2
-    log_error "Usage: $0 <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] [--auto-approve]" >&2
+if [ ${#missing_params[@]} -gt 0 ]; then
+    log_error "Missing required parameters: ${missing_params[*]}" >&2
+    show_help
     exit 1
 fi
 
-for i in {0..4}; do
-    if [ -z "${filtered_args[i]}" ]; then
-        log_error "Parameter $((i+1)) is empty. All mandatory parameters must have values." >&2
-        log_error "Usage: $0 <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] [--auto-approve]" >&2
-        exit 1
-    fi
-done
 
-# Assign mandatory parameters first (positions 0-4)
-SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-${filtered_args[0]}}"
-BACKEND_URL="${BACKEND_URL:-${filtered_args[1]}}"
-BEARER_TOKEN="${BEARER_TOKEN:-${filtered_args[2]}}"
-INSTALLATION_ID="${INSTALLATION_ID:-${filtered_args[3]}}"
-ATTEMPT_ID="${ATTEMPT_ID:-${filtered_args[4]}}"
-
-# Interactive prompts for APP_NAME and ROLE_NAME if not provided (positions 5-6)
-if [ -z "$APP_NAME" ] && [ ${#filtered_args[@]} -le 5 ]; then
+# Interactive prompts for APP_NAME and ROLE_NAME if not provided as flags
+if [ -z "$APP_NAME" ]; then
     default_app_name="SaltAppServicePrincipal"
-    echo -n "Enter APP_NAME (default: $default_app_name): "
+    echo -n "Enter Application Name (If none is provided, the following default will be used: $default_app_name): "
     read user_app_name
     APP_NAME="${user_app_name:-$default_app_name}"
-else
-    APP_NAME="${APP_NAME:-${filtered_args[5]:-SaltAppServicePrincipal}}"
 fi
 
-if [ -z "$ROLE_NAME" ] && [ ${#filtered_args[@]} -le 6 ]; then
+if [ -z "$ROLE_NAME" ]; then
     default_role_name="SaltCustomAppRole"
-    echo -n "Enter ROLE_NAME (default: $default_role_name): "
+    echo -n "Enter Custom Role Name (If none is provided, the following default will be used: $default_role_name): "
     read user_role_name
     ROLE_NAME="${user_role_name:-$default_role_name}"
-else
-    ROLE_NAME="${ROLE_NAME:-${filtered_args[6]:-SaltCustomAppRole}}"
 fi
 
-CREATED_BY="${CREATED_BY:-${filtered_args[7]:-Salt Security}}"
+# Set default value for CREATED_BY if not provided
+CREATED_BY="${CREATED_BY:-Salt Security}"
 
 log_info ""
 log_info "╔══════════════════════════════════════════════════════════════════════════════════╗" "${BLUE}${BOLD}"
@@ -519,6 +616,10 @@ log_info "Custom Role Name: $ROLE_NAME" "${MAGENTA}${BOLD}"
 log_info ""
 log_info "Ready to begin setup..." "${CYAN}${BOLD}"
 log_info ""
+
+# Set up signal handling for cleanup
+trap cleanup EXIT
+trap 'echo -e "\n${YELLOW}Received interrupt signal, cleaning up...${NC}"; exit 130' INT TERM
 
 if [ "$AUTO_APPROVE" = true ]; then
     log_info "Auto-approve mode enabled - Starting Azure authentication setup..." "${GREEN}${BOLD}"

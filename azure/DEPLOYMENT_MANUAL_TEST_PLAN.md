@@ -21,36 +21,75 @@ This manual test plan is derived from the comprehensive automated test suite in 
 - [ ] Sufficient permissions for creating Azure AD apps, service principals, and custom roles
 
 ### Script Usage
-The script accepts parameters in this order:
+The script now uses named flags for all parameters:
 ```bash
-./azure-deployment-script.sh <subscription_id> <backend_url> <bearer_token> <installation_id> <attempt_id> [app_name] [role_name] [created_by] --auto-approve
+./azure-deployment-script.sh --subscription-id=<id> --backend-url=<url> --bearer-token=<token> --installation-id=<id> --attempt-id=<id> [--app-name=<name>] [--role-name=<name>] [--created-by=<name>] [--auto-approve] [--help]
 ```
 
-### Environment Variables (Recommended Approach)
-For consistent testing, set these environment variables:
+**Required flags:**
+- `--subscription-id=<uuid>` - Azure subscription ID
+- `--backend-url=<url>` - Backend service URL  
+- `--bearer-token=<token>` - Authentication bearer token
+- `--installation-id=<uuid>` - Installation identifier
+- `--attempt-id=<uuid>` - Attempt identifier
 
-```bash
-export SUBSCRIPTION_ID="your-test-subscription-id"
-export BACKEND_URL="https://api.test.com/webhook"  # Required
-export BEARER_TOKEN="test-token-123"              # Required
-export INSTALLATION_ID="$(uuidgen)"               # Required
-export ATTEMPT_ID="$(uuidgen)"                    # Required
-export APP_NAME="ManualTestApp"                   # Optional (has interactive prompt with default)
-export ROLE_NAME="ManualTestRole"                 # Optional (has interactive prompt with default)
-export CREATED_BY="Manual Test User"              # Optional (has default)
-```
+**Optional flags:**
+- `--app-name=<name>` - Application name (defaults to interactive prompt)
+- `--role-name=<name>` - Custom role name (defaults to interactive prompt)  
+- `--created-by=<name>` - Created by identifier (defaults to "Salt Security")
+- `--auto-approve` - Skip confirmation prompts
+- `--help` - Show usage information
 
 ### Command Line Examples
 ```bash
-# Using environment variables (recommended):
+# Using flags (recommended approach):
+./azure-deployment-script.sh \
+  --subscription-id="your-test-subscription-id" \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token-123" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
+
+# With optional parameters:
+./azure-deployment-script.sh \
+  --subscription-id="your-test-subscription-id" \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token-123" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --app-name="ManualTestApp" \
+  --role-name="ManualTestRole" \
+  --created-by="Manual Test User" \
+  --auto-approve
+
+# Interactive mode (without --auto-approve, prompts for app/role names):
+./azure-deployment-script.sh \
+  --subscription-id="your-test-subscription-id" \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token-123" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)"
+
+# Get help:
+./azure-deployment-script.sh --help
+```
+
+### Environment Variables (Still Supported)
+Environment variables are still supported as fallbacks when flags are not provided:
+
+```bash
+export SUBSCRIPTION_ID="your-test-subscription-id"
+export BACKEND_URL="https://api.test.com/webhook"
+export BEARER_TOKEN="test-token-123"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="ManualTestApp"                   # Optional
+export ROLE_NAME="ManualTestRole"                 # Optional
+export CREATED_BY="Manual Test User"              # Optional
+
+# Then run with flags taking precedence:
 ./azure-deployment-script.sh --auto-approve
-
-# Using command line parameters:
-./azure-deployment-script.sh "subscription-id" "https://api.test.com" "bearer-token" "$(uuidgen)" "$(uuidgen)" --auto-approve
-
-# Mixed approach (mandatory params on command line, optional via environment):
-export APP_NAME="MyTestApp"
-./azure-deployment-script.sh "subscription-id" "https://api.test.com" "bearer-token" "$(uuidgen)" "$(uuidgen)" --auto-approve
 ```
 
 ## Test Categories and Scenarios
@@ -212,35 +251,68 @@ export ROLE_NAME="Role@Invalid!Characters"
 
 **Test Cases**:
 ```bash
+# Test missing subscription ID:
+./azure-deployment-script.sh \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
+
 # Test missing backend URL:
-unset BACKEND_URL
-./azure-deployment-script.sh --auto-approve
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --bearer-token="test-token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
 
 # Test missing bearer token:
-export BACKEND_URL="https://api.test.com/webhook"
-unset BEARER_TOKEN
-./azure-deployment-script.sh --auto-approve
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --backend-url="https://api.test.com/webhook" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
 
 # Test missing installation ID:
-export BEARER_TOKEN="test-token"
-unset INSTALLATION_ID
-./azure-deployment-script.sh --auto-approve
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
 
 # Test missing attempt ID:
-export INSTALLATION_ID="$(uuidgen)"
-unset ATTEMPT_ID
-./azure-deployment-script.sh --auto-approve
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --backend-url="https://api.test.com/webhook" \
+  --bearer-token="test-token" \
+  --installation-id="$(uuidgen)" \
+  --auto-approve
 
-# Test empty parameters (passed as empty strings):
-./azure-deployment-script.sh "" "https://api.test.com" "token" "$(uuidgen)" "$(uuidgen)" --auto-approve
-./azure-deployment-script.sh "$(uuidgen)" "" "token" "$(uuidgen)" "$(uuidgen)" --auto-approve
-./azure-deployment-script.sh "$(uuidgen)" "https://api.test.com" "" "$(uuidgen)" "$(uuidgen)" --auto-approve
+# Test empty parameters (passed as empty values):
+./azure-deployment-script.sh \
+  --subscription-id="" \
+  --backend-url="https://api.test.com" \
+  --bearer-token="token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
+
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --backend-url="" \
+  --bearer-token="token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
 ```
 
 **Expected Results**:
 - Script exits with validation error for each missing parameter
-- Error: "Missing required parameters. Expected 5 mandatory parameters, got X" (for insufficient parameters)
-- Error: "Parameter X is empty. All mandatory parameters must have values." (for empty strings)
+- Error: "Missing required parameters: --subscription-id --backend-url" (for missing flags)
+- Error: "All required parameters must have non-empty values" (for empty flag values)
 - No authentication or resource creation attempts
 
 #### INP-005: Invalid Backend URL Format ✅
@@ -709,15 +781,26 @@ export ATTEMPT_ID="$(uuidgen)"
 
 **Setup**:
 ```bash
+# Test with empty bearer token flag
+./azure-deployment-script.sh \
+  --subscription-id="$(uuidgen)" \
+  --backend-url="https://httpbin.org/post" \
+  --bearer-token="" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
+
+# OR test with empty environment variable
 export BACKEND_URL="https://httpbin.org/post"
 export BEARER_TOKEN=""
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
+./azure-deployment-script.sh --auto-approve
 ```
 
 **Expected Results**:
 - Script exits during validation phase  
-- Error: "Parameter 3 is empty. All mandatory parameters must have values."
+- Error: "Missing required parameters: --bearer-token" (if flag missing) OR "All required parameters must have non-empty values" (if flag empty)
 - No Azure resource creation attempts
 
 ### 7. Edge Cases and Boundary Tests
@@ -763,8 +846,8 @@ export ROLE_NAME="B"
 
 ### 8. Environment & Configuration Tests
 
-#### ENV-001: Environment Variable vs Parameter Precedence
-**Objective**: Test that command line parameters take precedence over environment variables.
+#### ENV-001: Environment Variable vs Flag Precedence
+**Objective**: Test that command line flags take precedence over environment variables.
 
 **Setup**:
 ```bash
@@ -780,17 +863,26 @@ export ROLE_NAME="EnvRole"
 
 **Test Cases**:
 ```bash
-# Test that command line parameters override environment variables
-./azure-deployment-script.sh "cli-subscription-id" "https://cli.test.com" "cli-bearer-token" "$(uuidgen)" "$(uuidgen)" "CLIApp" "CLIRole" "CLI User" --auto-approve
+# Test that command line flags override environment variables
+./azure-deployment-script.sh \
+  --subscription-id="cli-subscription-id" \
+  --backend-url="https://cli.test.com" \
+  --bearer-token="cli-bearer-token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --app-name="CLIApp" \
+  --role-name="CLIRole" \
+  --created-by="CLI User" \
+  --auto-approve
 ```
 
 **Expected Results**:
-- Script uses command line parameters, not environment variables
+- Script uses command line flag values, not environment variables
 - Resources created with names "CLIApp" and "CLIRole" (with nonce suffixes)
-- Log shows CLI parameters being used
+- Log shows flag parameters being used
 
 #### ENV-002: Mixed Parameter Sources
-**Objective**: Test mixed usage of environment variables and command line parameters.
+**Objective**: Test mixed usage of environment variables and command line flags.
 
 **Setup**:
 ```bash
@@ -803,12 +895,18 @@ export ROLE_NAME="MixedEnvRole"
 
 **Test Cases**:
 ```bash
-# Provide only mandatory parameters via CLI, optional via environment
-./azure-deployment-script.sh "$(uuidgen)" "$(uuidgen)" --auto-approve
+# Provide only mandatory parameters via flags, optional via environment
+./azure-deployment-script.sh \
+  --subscription-id="your-valid-test-subscription-id" \
+  --backend-url="https://httpbin.org/post" \
+  --bearer-token="test-valid-token" \
+  --installation-id="$(uuidgen)" \
+  --attempt-id="$(uuidgen)" \
+  --auto-approve
 ```
 
 **Expected Results**:
-- Script uses CLI parameters for mandatory fields
+- Script uses flag parameters for mandatory fields
 - Script uses environment variables for APP_NAME and ROLE_NAME
 - Resources created with "MixedEnvApp" and "MixedEnvRole" names
 
@@ -1170,8 +1268,8 @@ az account set --subscription "your-test-subscription-id"
 
 ---
 
-**Test Plan Version**: 1.0  
-**Last Updated**: 2025-01-09  
-**Script Version**: Updated parameter order - mandatory parameters first (subscription_id, backend_url, bearer_token, installation_id, attempt_id), then optional parameters (app_name, role_name, created_by)  
+**Test Plan Version**: 2.0  
+**Last Updated**: 2025-01-01  
+**Script Version**: Updated to use named flags - all parameters now use --flag=value syntax instead of positional arguments  
 **Based on Automated Tests**: azure/tests/ directory  
 **Estimated Execution Time**: 4-6 hours for full test suite
