@@ -569,6 +569,274 @@ az ad sp list --display-name "TestApp"
 az role definition list --name "TestRole" --custom-role-only
 ```
 
+#### ERR-001a: Interrupt During Dependency Check ✅
+**Objective**: Test interrupt behavior during initial dependency validation.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Press Ctrl+C immediately during "Checking required dependencies..." message
+3. Observe behavior
+
+**Expected Results**:
+- Script catches SIGINT signal immediately
+- Shows "Received interrupt signal" message
+- Cleanup function runs but finds no Azure resources to clean
+- Shows "Cleanup completed (no Azure resources were created). Check log file: [filename]"
+- Log file contains interrupt details
+- Exits with code 130
+
+#### ERR-001b: Interrupt During Azure Authentication ✅
+**Objective**: Test interrupt behavior during Azure CLI authentication check.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Press Ctrl+C during "Checking Azure CLI authentication..." phase
+3. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during auth check
+- Shows interrupt message
+- Cleanup runs but no Azure resources exist yet
+- Shows "Cleanup completed (no Azure resources were created). Check log file: [filename]"
+- Exits with code 130
+
+#### ERR-001c: Interrupt During Azure AD Application Creation ✅
+**Objective**: Test interrupt behavior during application creation phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptTestApp"
+export ROLE_NAME="InterruptTestRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for "AZURE AD APPLICATION SETUP" section to appear
+3. Press Ctrl+C during "Creating Azure AD application" phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during app creation
+- Cleanup function checks for and deletes any created Azure AD application
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- Log shows specific resources that were cleaned up
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify no orphaned application exists
+az ad app list --display-name "InterruptTestApp*"
+```
+
+#### ERR-001d: Interrupt During Client Secret Creation ✅
+**Objective**: Test interrupt behavior during client secret creation phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptSecretApp"
+export ROLE_NAME="InterruptSecretRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for Azure AD application to be created successfully
+3. Press Ctrl+C during "Creating client secret..." phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during secret creation
+- Cleanup deletes the Azure AD application (created before interrupt)
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- No service principal or role resources created yet
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify application was cleaned up
+az ad app list --display-name "InterruptSecretApp*"
+```
+
+#### ERR-001e: Interrupt During Service Principal Creation ✅
+**Objective**: Test interrupt behavior during service principal creation phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptSPApp"
+export ROLE_NAME="InterruptSPRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for "SERVICE PRINCIPAL CREATION" section to appear
+3. Press Ctrl+C during "Creating service principal..." phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during service principal creation
+- Cleanup deletes Azure AD application and any created service principal
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- Log shows specific cleanup actions taken
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify all resources cleaned up
+az ad app list --display-name "InterruptSPApp*"
+az ad sp list --display-name "InterruptSPApp*"
+```
+
+#### ERR-001f: Interrupt During Custom Role Creation ✅
+**Objective**: Test interrupt behavior during custom role creation phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptRoleApp"
+export ROLE_NAME="InterruptRoleRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for "PERMISSION CONFIGURATION" section to appear
+3. Press Ctrl+C during "Creating custom role..." phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during role creation
+- Cleanup deletes service principal and Azure AD application
+- Temporary role definition file (custom-role.json) is removed
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify all resources cleaned up
+az ad app list --display-name "InterruptRoleApp*"
+az ad sp list --display-name "InterruptRoleApp*"
+az role definition list --name "InterruptRoleRole*" --custom-role-only
+ls custom-role.json  # Should not exist
+```
+
+#### ERR-001g: Interrupt During Role Assignment ✅
+**Objective**: Test interrupt behavior during role assignment phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptAssignApp"
+export ROLE_NAME="InterruptAssignRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for custom role to be created successfully
+3. Press Ctrl+C during "Assigning custom role to service principal..." phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during role assignment
+- Cleanup deletes all created resources in proper order:
+  1. Role assignments (if any were created)
+  2. Custom role definition
+  3. Service principal
+  4. Azure AD application
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify complete cleanup
+az ad app list --display-name "InterruptAssignApp*"
+az ad sp list --display-name "InterruptAssignApp*"
+az role definition list --name "InterruptAssignRole*" --custom-role-only
+az role assignment list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?contains(principalName, 'InterruptAssignApp')]"
+```
+
+#### ERR-001h: Interrupt During Service Principal Verification ✅
+**Objective**: Test interrupt behavior during final service principal verification phase.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="InterruptVerifyApp"
+export ROLE_NAME="InterruptVerifyRole"
+```
+
+**Steps**:
+1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+2. Wait for role assignment to complete successfully
+3. Press Ctrl+C during "Verifying service principal authentication readiness..." phase
+4. Verify cleanup behavior
+
+**Expected Results**:
+- Script catches SIGINT during verification
+- All Azure resources (app, SP, role, assignments) have been created
+- Cleanup deletes ALL created resources in proper order
+- Shows "Successfully deleted the created resources. Check log file: [filename]" (GREEN with ✅)
+- Exits with code 130
+
+**Verification**:
+```bash
+# Verify complete cleanup of fully deployed resources
+az ad app list --display-name "InterruptVerifyApp*"
+az ad sp list --display-name "InterruptVerifyApp*"
+az role definition list --name "InterruptVerifyRole*" --custom-role-only
+az role assignment list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?contains(principalName, 'InterruptVerifyApp')]"
+```
+
+**Important Notes for All Interrupt Tests**:
+1. **Color Coding**: Interrupt cleanup shows GREEN messages with ✅ (indicating successful cleanup after intentional interruption)
+2. **Log File Reference**: All cleanup completion messages include log file location
+3. **No DEPLOYMENT SUMMARY**: Interrupted scripts skip the normal DEPLOYMENT SUMMARY section and show results only in cleanup messages
+4. **Exit Code**: All interrupts should exit with code 130
+5. **Resource Cleanup Order**: Resources are always cleaned in reverse order of creation (assignments → role → service principal → application)
+6. **Safety Feature**: Script only deletes resources it created during the current execution, never existing resources from previous deployments
+
 #### ERR-002: Service Principal Verification Timeout ✅
 **Objective**: Test timeout handling during SP verification.
 
@@ -712,6 +980,70 @@ export ATTEMPT_ID="$(uuidgen)"
 - Reports which cleanup operations failed
 - Provides manual cleanup instructions
 - Does not hang indefinitely on failed cleanup operations
+
+#### ERR-010: Safety Test - Existing Resource Protection ✅
+**Objective**: Test that script never deletes existing Azure resources it didn't create.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export BACKEND_URL="https://httpbin.org/post"
+export BEARER_TOKEN="test-valid-token"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="SafetyTestApp"
+export ROLE_NAME="SafetyTestRole"
+```
+
+**Steps**:
+1. **Pre-create Azure resources manually** with the same base name (without nonce):
+   ```bash
+   # Create an existing application with the same base name
+   az ad app create --display-name "SafetyTestApp-existing" --sign-in-audience AzureADMyOrg
+   
+   # Create an existing custom role with the same base name
+   az role definition create --role-definition '{
+     "Name": "SafetyTestRole-existing",
+     "Description": "Existing role for safety test",
+     "Actions": ["Microsoft.Resources/subscriptions/resourceGroups/read"],
+     "AssignableScopes": ["/subscriptions/'$SUBSCRIPTION_ID'"]
+   }'
+   ```
+2. **Run deployment script** (which will create resources with different nonces):
+   ```bash
+   ./azure-deployment-script.sh --auto-approve
+   ```
+3. **Interrupt script** during role assignment or verification phase (Ctrl+C)
+4. **Verify cleanup behavior** - check that existing resources remain untouched
+
+**Expected Results**:
+- Script creates new resources with unique nonces (e.g., `SafetyTestApp-a1b2c3d4`, `SafetyTestRole-a1b2c3d4`)
+- When interrupted, cleanup **only deletes resources created during current run**
+- Pre-existing resources (`SafetyTestApp-existing`, `SafetyTestRole-existing`) remain **untouched**
+- Cleanup messages show only current-run resources being deleted
+
+**Verification**:
+```bash
+# Verify existing resources are still there
+az ad app list --display-name "SafetyTestApp-existing"
+az role definition list --name "SafetyTestRole-existing" --custom-role-only
+
+# Verify script-created resources are cleaned up
+az ad app list --display-name "SafetyTestApp-*" --query "[?displayName!='SafetyTestApp-existing']"
+az role definition list --custom-role-only --query "[?roleName | contains(@, 'SafetyTestRole') && roleName!='SafetyTestRole-existing']"
+```
+
+**Manual Cleanup**:
+```bash
+# Clean up the pre-created test resources
+az ad app delete --id $(az ad app list --display-name "SafetyTestApp-existing" --query "[0].id" -o tsv)
+az role definition delete --name "SafetyTestRole-existing" --scope "/subscriptions/$SUBSCRIPTION_ID"
+```
+
+**Safety Notes**:
+- This test confirms the critical safety feature: script tracks what it creates and only cleans up its own resources
+- Even with similar names, the script never touches resources created by other processes/deployments
+- The `role_created_this_run` tracking flag prevents accidental deletion of existing infrastructure
 
 ### 6. Backend Integration Tests
 
@@ -1082,6 +1414,14 @@ Use this checklist to track test execution:
 
 ### Error Handling Tests
 - [✅] ERR-001: SIGINT cleanup
+- [ ] ERR-001a: Interrupt during dependency check
+- [ ] ERR-001b: Interrupt during Azure authentication
+- [ ] ERR-001c: Interrupt during Azure AD application creation
+- [ ] ERR-001d: Interrupt during client secret creation
+- [ ] ERR-001e: Interrupt during service principal creation
+- [ ] ERR-001f: Interrupt during custom role creation
+- [ ] ERR-001g: Interrupt during role assignment
+- [ ] ERR-001h: Interrupt during service principal verification
 - [✅] ERR-002: Service principal verification timeout
 - [ ] ERR-003: SIGTERM cleanup
 - [ ] ERR-004: Azure AD application creation failure
@@ -1090,6 +1430,7 @@ Use this checklist to track test execution:
 - [ ] ERR-007: Role assignment failure
 - [ ] ERR-008: Network connectivity issues during Azure operations
 - [ ] ERR-009: Cleanup failure scenarios
+- [ ] ERR-010: Safety test - existing resource protection
 
 ### Backend Integration Tests
 - [✅] BCK-001: Successful backend communication

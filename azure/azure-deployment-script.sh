@@ -101,11 +101,11 @@ cleanup() {
         
         # Delete resources in reverse order of creation to avoid dependency issues
         # Step 1: Delete role assignments first (required before role definition can be deleted)
-        if [ -n "$sp_object_id" ] && ([ -n "$role_definition_id" ] || [ -n "$ROLE_NAME_WITH_NONCE" ]); then
+        if [ "$role_created_this_run" = true ] && ([ -n "$role_definition_id" ] || [ -n "$ROLE_NAME_WITH_NONCE" ]); then
             log_info ""
             log_info "Checking for role assignments to delete..." "${YELLOW}"
             
-            # Get the role ID if we don't have it yet (race condition case)
+            # Get the role ID if we don't have it yet
             local cleanup_role_id="$role_definition_id"
             if [ -z "$cleanup_role_id" ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
                 if role_list_result=$(az role definition list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
@@ -116,9 +116,8 @@ cleanup() {
             fi
             
             if [ -n "$cleanup_role_id" ]; then
-                # Get role assignments for the service principal with the custom role
+                # Get ALL role assignments for this role (not just for our service principal)
                 if assignments=$(az role assignment list \
-                    --assignee "$sp_object_id" \
                     --role "$cleanup_role_id" \
                     --scope "/subscriptions/$SUBSCRIPTION_ID" \
                     --query "[].{id:id}" -o json 2>/dev/null); then
@@ -144,9 +143,9 @@ cleanup() {
                         done
                     else
                         if [ "$is_interrupt" = true ]; then
-                            log_info "✅ No role assignments between service principal and custom role found - nothing to clean up" "${GREEN}"
+                            log_info "✅ No role assignments found for this role - nothing to clean up" "${GREEN}"
                         else
-                            log_info "No role assignments between service principal and custom role found - nothing to clean up" "${YELLOW}"
+                            log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
                         fi
                     fi
                 else
@@ -156,9 +155,9 @@ cleanup() {
         fi
         
         # Step 2: Delete custom role (now that assignments are gone)
-        log_info "Checking if custom role exists: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
-        if [ -n "$role_definition_id" ]; then
-            log_info "Found! Deleting custom role..." "${YELLOW}"
+        log_info "Checking if custom role was created during this deployment..." "${YELLOW}"
+        if [ "$role_created_this_run" = true ] && [ -n "$role_definition_id" ]; then
+            log_info "Custom role was created. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
             if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
                     log_info "✅ Custom role deleted successfully" "${GREEN}"
@@ -168,14 +167,14 @@ cleanup() {
             else
                 log_warning "Custom role deletion failed: $role_delete_result"
             fi
-        elif [ -n "$ROLE_NAME_WITH_NONCE" ]; then
+        elif [ "$role_created_this_run" = true ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
             # Fallback: check if role exists by name and delete it (handles race conditions)
             # Use role definition list to find the role by name pattern, then extract ID
             if role_list_result=$(az role definition list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
                 if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                     role_definition_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                     if [ -n "$role_definition_id" ] && [ "$role_definition_id" != "null" ]; then
-                        log_info "Found! Deleting custom role..." "${YELLOW}"
+                        log_info "Custom role found. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
                         log_info "Role ID: $role_definition_id" "${YELLOW}"
                         if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
                             if [ "$is_interrupt" = true ]; then
@@ -190,21 +189,27 @@ cleanup() {
                         log_info "Custom role found in list but could not extract ID" "${YELLOW}"
                     fi
                 else
-                    log_info "Role not found in custom roles list - skipping role cleanup" "${YELLOW}"
+                    log_info "Custom role not found - skipping role cleanup" "${YELLOW}"
                 fi
             else
                 log_info "Failed to list custom roles. CLI result: $role_list_result" "${YELLOW}"
                 log_info "This might be due to Azure propagation delays or subscription context issues" "${YELLOW}"
             fi
         else
-            log_info "No custom role information available - skipping role cleanup" "${YELLOW}"
+            log_info "No custom role was created during this deployment - skipping role cleanup" "${YELLOW}"
+        fi
+        
+        # Always remove temporary role definition file after role cleanup attempt
+        if [ -f custom-role.json ]; then
+            rm -f custom-role.json
+            log_info "Removed temporary role definition file" "${YELLOW}"
         fi
         
         # Step 3: Delete service principal
         log_info ""
-        log_info "Checking if service principal exists for app: $APP_NAME_WITH_NONCE" "${YELLOW}"
+        log_info "Checking if service principal was created during this deployment..." "${YELLOW}"
         if [ -n "$sp_object_id" ]; then
-            log_info "Found! Deleting service principal..." "${YELLOW}"
+            log_info "Service principal was created. Deleting service principal for app: $APP_NAME_WITH_NONCE" "${YELLOW}"
             if sp_delete_result=$(az ad sp delete --id "$sp_object_id" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
                     log_info "✅ Service principal deleted successfully" "${GREEN}"
@@ -215,14 +220,14 @@ cleanup() {
                 log_warning "Service principal deletion failed: $sp_delete_result"
             fi
         else
-            log_info "No service principal information available - skipping service principal cleanup" "${YELLOW}"
+            log_info "No service principal was created during this deployment - skipping service principal cleanup" "${YELLOW}"
         fi
         
         # Step 4: Delete Azure AD application
         log_info ""
-        log_info "Checking if Azure AD application exists: $APP_NAME_WITH_NONCE" "${YELLOW}"
+        log_info "Checking if Azure AD application was created during this deployment..." "${YELLOW}"
         if [ -n "$app_id" ]; then
-            log_info "Found! Deleting Azure AD application (and client secret)..." "${YELLOW}"
+            log_info "Application was created. Deleting Azure AD application (and client secret): $APP_NAME_WITH_NONCE" "${YELLOW}"
             if app_delete_result=$(az ad app delete --id "$app_id" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
                     log_info "✅ Azure AD application deleted successfully" "${GREEN}"
@@ -233,7 +238,7 @@ cleanup() {
                 log_warning "Azure AD application deletion failed: $app_delete_result"
             fi
         else
-            log_info "No Azure AD application information available - skipping application cleanup" "${YELLOW}"
+            log_info "No Azure AD application was created during this deployment - skipping application cleanup" "${YELLOW}"
         fi
         
         # Send failure notification to backend only for interruptions (not normal script errors)
@@ -246,15 +251,19 @@ cleanup() {
         # Show appropriate cleanup completion message
         if [ -n "$role_definition_id" ] || [ -n "$sp_object_id" ] || [ -n "$app_id" ]; then
             if [ "$is_interrupt" = true ]; then
-                log_info "✅ Successfully deleted the created resources" "${GREEN}"
+                log_info "✅ Successfully deleted the created resources. Check log file: $LOG_FILE" "${GREEN}"
+                log_info "Check log file: $LOG_FILE" "${NC}"
             else
-                log_info "Successfully deleted the created resources" "${YELLOW}"
+                log_info "Successfully deleted the created resources. Check log file: $LOG_FILE" "${YELLOW}"
+                log_info "Check log file: $LOG_FILE" "${NC}"
             fi
         else
             if [ "$is_interrupt" = true ]; then
-                log_info "✅ Cleanup completed (no Azure resources were created)" "${GREEN}"
+                log_info "✅ Cleanup completed (no Azure resources were created). Check log file: $LOG_FILE" "${GREEN}"
+                log_info "Check log file: $LOG_FILE" "${NC}"
             else
-                log_info "Cleanup completed (no Azure resources were created)" "${YELLOW}"
+                log_info "Cleanup completed (no Azure resources were created). Check log file: $LOG_FILE" "${YELLOW}"
+                log_info "Check log file: $LOG_FILE" "${NC}"
             fi
         fi
     else
@@ -262,11 +271,6 @@ cleanup() {
         log_info "Deployment completed successfully - keeping created resources" "${GREEN}"
     fi
     
-    # Always remove temporary role definition file
-    if [ -f custom-role.json ]; then
-        rm -f custom-role.json
-        log_info "Removed temporary role definition file" "${YELLOW}"
-    fi
 }
 
 # Function to check Azure CLI authentication
@@ -619,7 +623,7 @@ log_info ""
 
 # Set up signal handling for cleanup
 trap cleanup EXIT
-trap 'echo -e "\n${YELLOW}Received interrupt signal, cleaning up...${NC}"; exit 130' INT TERM
+trap 'echo -e "\n${RED}${BOLD}Received interrupt signal, cleaning up...${NC}"; exit 130' INT TERM
 
 if [ "$AUTO_APPROVE" = true ]; then
     log_info "Auto-approve mode enabled - Starting Azure authentication setup..." "${GREEN}${BOLD}"
@@ -647,6 +651,9 @@ tenant_id=""
 backend_sent=false
 error_occurred=false
 error_message=""
+
+# Track what resources were actually created during this script execution
+role_created_this_run=false
 
 # Create resource tag and append nonce to resource names for uniqueness (nonce already generated at script start)
 resource_tag="CreatedBySalt-${nonce}"
@@ -808,6 +815,7 @@ EOF
             json_part=$(echo "$role_result" | sed -n '/^{/,$p')
             if echo "$json_part" | jq . >/dev/null 2>&1; then
                 role_definition_id=$(echo "$json_part" | jq -r '.id')
+                role_created_this_run=true
                 log_info "✅ Custom role created - Role ID: $role_definition_id" "${GREEN}"
                 log_info ""
             else
