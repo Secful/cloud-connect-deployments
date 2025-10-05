@@ -2,9 +2,9 @@
 
 ## Overview
 
-This manual test plan is derived from the comprehensive automated test suite in `azure/tests/`. It provides step-by-step instructions for manually validating the Azure deployment script functionality across all critical scenarios.
+This manual test plan provides step-by-step instructions for manually validating the Azure deployment script functionality across all critical scenarios.
 
-**Target Script**: `azure-deployment-script.sh`  
+**Target Script**: `subscription-level-deployment.sh`  
 **Test Environment**: Azure Cloud Shell (recommended) or local environment with Azure CLI  
 **Prerequisites**: Active Azure subscription with appropriate permissions  
 
@@ -23,12 +23,12 @@ This manual test plan is derived from the comprehensive automated test suite in 
 ### Script Usage
 The script now uses named flags for all parameters:
 ```bash
-./azure-deployment-script.sh --subscription-id=<id> --backend-url=<url> --bearer-token=<token> --installation-id=<id> --attempt-id=<id> [--app-name=<name>] [--role-name=<name>] [--created-by=<name>] [--auto-approve] [--help]
+./subscription-level-deployment.sh --subscription-id=<id> --salt-host=<url> --bearer-token=<token> --installation-id=<id> --attempt-id=<id> [--app-name=<name>] [--role-name=<name>] [--created-by=<name>] [--auto-approve] [--help]
 ```
 
 **Required flags:**
 - `--subscription-id=<uuid>` - Azure subscription ID
-- `--backend-url=<url>` - Backend service URL  
+- `--salt-host=<url>` - Salt host URL (will be combined with endpoint path)
 - `--bearer-token=<token>` - Authentication bearer token
 - `--installation-id=<uuid>` - Installation identifier
 - `--attempt-id=<uuid>` - Attempt identifier
@@ -43,18 +43,18 @@ The script now uses named flags for all parameters:
 ### Command Line Examples
 ```bash
 # Using flags (recommended approach):
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="your-test-subscription-id" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token-123" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
 # With optional parameters:
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="your-test-subscription-id" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token-123" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -64,15 +64,15 @@ The script now uses named flags for all parameters:
   --auto-approve
 
 # Interactive mode (without --auto-approve, prompts for app/role names):
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="your-test-subscription-id" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token-123" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)"
 
 # Get help:
-./azure-deployment-script.sh --help
+./subscription-level-deployment.sh --help
 ```
 
 ### Environment Variables (Still Supported)
@@ -80,7 +80,7 @@ Environment variables are still supported as fallbacks when flags are not provid
 
 ```bash
 export SUBSCRIPTION_ID="your-test-subscription-id"
-export BACKEND_URL="https://api.test.com/webhook"
+export SALT_HOST="https://api.test.com/webhook"
 export BEARER_TOKEN="test-token-123"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -89,7 +89,7 @@ export ROLE_NAME="ManualTestRole"                 # Optional
 export CREATED_BY="Manual Test User"              # Optional
 
 # Then run with flags taking precedence:
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 ```
 
 ## Test Categories and Scenarios
@@ -104,7 +104,7 @@ export CREATED_BY="Manual Test User"              # Optional
 1. Temporarily rename or move the `az` command (check actual location first with `which az`):
    - Common locations: `/usr/bin/az`, `/opt/homebrew/bin/az`, `/usr/local/bin/az`
    - Example: `sudo mv /opt/homebrew/bin/az /opt/homebrew/bin/az.bak`
-2. Run the deployment script: `./azure-deployment-script.sh --auto-approve`
+2. Run the deployment script: `./subscription-level-deployment.sh --auto-approve`
 3. Observe the error message
 
 **Expected Results**:
@@ -123,7 +123,7 @@ export CREATED_BY="Manual Test User"              # Optional
    - If jq is in `/usr/bin/jq` (system protected): Temporarily modify PATH: `export PATH=$(echo $PATH | sed 's|/usr/bin:||g')`
    - If jq is in `/opt/homebrew/bin/jq`: `sudo mv /opt/homebrew/bin/jq /opt/homebrew/bin/jq.bak`
    - If jq is in `/usr/local/bin/jq`: `sudo mv /usr/local/bin/jq /usr/local/bin/jq.bak`
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Check error handling
 
 **Expected Results**:
@@ -140,7 +140,7 @@ export CREATED_BY="Manual Test User"              # Optional
 
 **Steps**:
 1. Log out of Azure: `az logout`
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Verify error handling
 
 **Expected Results**:
@@ -159,7 +159,7 @@ export CREATED_BY="Manual Test User"              # Optional
    - If curl is in `/usr/bin/curl` (system protected): Temporarily modify PATH: `export PATH=$(echo $PATH | sed 's|/usr/bin:||g')`
    - If curl is in `/opt/homebrew/bin/curl`: `sudo mv /opt/homebrew/bin/curl /opt/homebrew/bin/curl.bak`
    - If curl is in `/usr/local/bin/curl`: `sudo mv /usr/local/bin/curl /usr/local/bin/curl.bak`
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Check error handling
 
 **Expected Results**:
@@ -178,7 +178,7 @@ export CREATED_BY="Manual Test User"              # Optional
 1. Temporarily make uuidgen unavailable (check actual location first with `which uuidgen`):
    - If uuidgen is in `/usr/bin/uuidgen`: Temporarily modify PATH: `export PATH=$(echo $PATH | sed 's|/usr/bin:||g')`
    - If uuidgen is in `/opt/homebrew/bin/uuidgen`: `sudo mv /opt/homebrew/bin/uuidgen /opt/homebrew/bin/uuidgen.bak`
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Check error handling
 
 **Expected Results**:
@@ -199,13 +199,13 @@ export CREATED_BY="Manual Test User"              # Optional
 ```bash
 # Test each invalid format:
 export SUBSCRIPTION_ID="invalid-uuid"
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 
 export SUBSCRIPTION_ID="12345"
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 
 export SUBSCRIPTION_ID=""
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 ```
 
 **Expected Results** (for each case):
@@ -253,7 +253,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 ```bash
 # Test missing subscription ID:
 ./azure-deployment-script.sh \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -270,7 +270,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 # Test missing bearer token:
 ./azure-deployment-script.sh \
   --subscription-id="$(uuidgen)" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
@@ -278,7 +278,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 # Test missing installation ID:
 ./azure-deployment-script.sh \
   --subscription-id="$(uuidgen)" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
@@ -286,7 +286,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 # Test missing attempt ID:
 ./azure-deployment-script.sh \
   --subscription-id="$(uuidgen)" \
-  --backend-url="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com/webhook" \
   --bearer-token="test-token" \
   --installation-id="$(uuidgen)" \
   --auto-approve
@@ -294,7 +294,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 # Test empty parameters (passed as empty values):
 ./azure-deployment-script.sh \
   --subscription-id="" \
-  --backend-url="https://api.test.com" \
+  --salt-host="https://api.test.com" \
   --bearer-token="token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -302,7 +302,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 
 ./azure-deployment-script.sh \
   --subscription-id="$(uuidgen)" \
-  --backend-url="" \
+  --salt-host="" \
   --bearer-token="token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -311,7 +311,7 @@ export ROLE_NAME="Role@Invalid!Characters"
 
 **Expected Results**:
 - Script exits with validation error for each missing parameter
-- Error: "Missing required parameters: --subscription-id --backend-url" (for missing flags)
+- Error: "Missing required parameters: --subscription-id --salt-host" (for missing flags)
 - Error: "All required parameters must have non-empty values" (for empty flag values)
 - No authentication or resource creation attempts
 
@@ -321,9 +321,9 @@ export ROLE_NAME="Role@Invalid!Characters"
 **Test Cases**:
 ```bash
 # Test invalid URL formats:
-export BACKEND_URL="invalid-url"
-export BACKEND_URL="ftp://invalid.protocol.com"
-export BACKEND_URL="api.test.com"  # Missing protocol
+export SALT_HOST="invalid-url"
+export SALT_HOST="ftp://invalid.protocol.com"
+export SALT_HOST="api.test.com"  # Missing protocol
 ```
 
 **Expected Results**:
@@ -338,12 +338,12 @@ export BACKEND_URL="api.test.com"  # Missing protocol
 ```bash
 # Test invalid installation ID:
 export INSTALLATION_ID="invalid-uuid"
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 
 # Test invalid attempt ID:
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="12345-invalid"
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 ```
 
 **Expected Results**:
@@ -403,7 +403,7 @@ az role assignment create --assignee "testuser@yourdomain.onmicrosoft.com" --rol
 **Steps**:
 1. **Check current permissions** using commands above
 2. If you have full permissions, this test is **informational only** - you cannot easily downgrade your own permissions
-3. Run: `./azure-deployment-script.sh --auto-approve`
+3. Run: `./subscription-level-deployment.sh --auto-approve`
 4. **OR** if testing with limited user: 
    - `az logout` 
    - `az login` (use limited user credentials)
@@ -440,7 +440,7 @@ az role assignment create --assignee "testuser@yourdomain.onmicrosoft.com" --rol
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"  # Test endpoint
+export SALT_HOST="https://httpbin.org/post"  # Test endpoint
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -450,7 +450,7 @@ export ROLE_NAME="TestSuccessRole"
 
 **Steps**:
 1. Ensure clean environment (no existing resources with same names)
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Monitor output for all deployment phases
 
 **Expected Results**:
@@ -488,7 +488,7 @@ az role definition list --name "TestSuccessRole" --custom-role-only
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -497,9 +497,9 @@ export ROLE_NAME="TestRole"
 ```
 
 **Steps**:
-1. Run the script first time: `./azure-deployment-script.sh --auto-approve`
+1. Run the script first time: `./subscription-level-deployment.sh --auto-approve`
 2. Note the nonce used in resource names (from output or log)
-3. Run the script second time: `./azure-deployment-script.sh --auto-approve`
+3. Run the script second time: `./subscription-level-deployment.sh --auto-approve`
 4. Verify both deployments succeed without conflicts
 
 **Expected Results**:
@@ -515,7 +515,7 @@ export ROLE_NAME="TestRole"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -542,14 +542,14 @@ export ROLE_NAME="TestRole"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Press Ctrl+C after application creation starts
 3. Verify cleanup behavior
 
@@ -575,14 +575,14 @@ az role definition list --name "TestRole" --custom-role-only
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Press Ctrl+C immediately during "Checking required dependencies..." message
 3. Observe behavior
 
@@ -600,14 +600,14 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Press Ctrl+C during "Checking Azure CLI authentication..." phase
 3. Verify cleanup behavior
 
@@ -624,7 +624,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -633,7 +633,7 @@ export ROLE_NAME="InterruptTestRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for "AZURE AD APPLICATION SETUP" section to appear
 3. Press Ctrl+C during "Creating Azure AD application" phase
 4. Verify cleanup behavior
@@ -657,7 +657,7 @@ az ad app list --display-name "InterruptTestApp*"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -666,7 +666,7 @@ export ROLE_NAME="InterruptSecretRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for Azure AD application to be created successfully
 3. Press Ctrl+C during "Creating client secret..." phase
 4. Verify cleanup behavior
@@ -690,7 +690,7 @@ az ad app list --display-name "InterruptSecretApp*"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -699,7 +699,7 @@ export ROLE_NAME="InterruptSPRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for "SERVICE PRINCIPAL CREATION" section to appear
 3. Press Ctrl+C during "Creating service principal..." phase
 4. Verify cleanup behavior
@@ -724,7 +724,7 @@ az ad sp list --display-name "InterruptSPApp*"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -733,7 +733,7 @@ export ROLE_NAME="InterruptRoleRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for "PERMISSION CONFIGURATION" section to appear
 3. Press Ctrl+C during "Creating custom role..." phase
 4. Verify cleanup behavior
@@ -760,7 +760,7 @@ ls custom-role.json  # Should not exist
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -769,7 +769,7 @@ export ROLE_NAME="InterruptAssignRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for custom role to be created successfully
 3. Press Ctrl+C during "Assigning custom role to service principal..." phase
 4. Verify cleanup behavior
@@ -799,7 +799,7 @@ az role assignment list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?con
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -808,7 +808,7 @@ export ROLE_NAME="InterruptVerifyRole"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve`
 2. Wait for role assignment to complete successfully
 3. Press Ctrl+C during "Verifying service principal authentication readiness..." phase
 4. Verify cleanup behavior
@@ -843,14 +843,14 @@ az role assignment list --scope "/subscriptions/$SUBSCRIPTION_ID" --query "[?con
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Run the script: `./azure-deployment-script.sh --auto-approve`
+1. Run the script: `./subscription-level-deployment.sh --auto-approve`
 2. Monitor the service principal verification phase
 3. Check timeout handling (if SP takes too long to be ready)
 
@@ -865,14 +865,14 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Start deployment: `./azure-deployment-script.sh --auto-approve &`
+1. Start deployment: `./subscription-level-deployment.sh --auto-approve &`
 2. Get the process ID: `ps aux | grep azure-deployment-script`
 3. Send SIGTERM: `kill -TERM <pid>`
 4. Verify cleanup behavior
@@ -930,7 +930,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -950,7 +950,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -987,7 +987,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1011,7 +1011,7 @@ export ROLE_NAME="SafetyTestRole"
    ```
 2. **Run deployment script** (which will create resources with different nonces):
    ```bash
-   ./azure-deployment-script.sh --auto-approve
+   ./subscription-level-deployment.sh --auto-approve
    ```
 3. **Interrupt script** during role assignment or verification phase (Ctrl+C)
 4. **Verify cleanup behavior** - check that existing resources remain untouched
@@ -1052,7 +1052,7 @@ az role definition delete --name "SafetyTestRole-existing" --scope "/subscriptio
 
 **Setup**:
 ```bash
-export BACKEND_URL="https://httpbin.org/post"  # Test endpoint that echoes requests
+export SALT_HOST="https://httpbin.org"  # Test endpoint that echoes requests (will be combined with endpoint path)
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1067,6 +1067,7 @@ export ATTEMPT_ID="$(uuidgen)"
 - Multiple status updates sent during deployment:
   - "Initiated" status at start
   - "Succeeded" status at completion
+- Requests sent to full URL: `https://httpbin.org/v1/cloud-connect/scan/azure`
 - Successful HTTP responses logged
 - "Successfully sent status 'X' to backend" messages
 
@@ -1076,7 +1077,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://nonexistent.invalid.domain/webhook"
+export SALT_HOST="https://nonexistent.invalid.domain/webhook"
 export BEARER_TOKEN="test-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1097,7 +1098,7 @@ export ATTEMPT_ID="$(uuidgen)"
 
 **Setup**:
 ```bash
-export BACKEND_URL="https://httpbin.org/status/401"  # Returns 401
+export SALT_HOST="https://httpbin.org/status/401"  # Returns 401
 export BEARER_TOKEN="invalid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1116,18 +1117,18 @@ export ATTEMPT_ID="$(uuidgen)"
 # Test with empty bearer token flag
 ./azure-deployment-script.sh \
   --subscription-id="$(uuidgen)" \
-  --backend-url="https://httpbin.org/post" \
+  --salt-host="https://httpbin.org/post" \
   --bearer-token="" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
 # OR test with empty environment variable
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN=""
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 ```
 
 **Expected Results**:
@@ -1185,7 +1186,7 @@ export ROLE_NAME="B"
 ```bash
 # Set environment variables
 export SUBSCRIPTION_ID="env-subscription-id"
-export BACKEND_URL="https://env.test.com/webhook"
+export SALT_HOST="https://env.test.com/webhook"
 export BEARER_TOKEN="env-bearer-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1198,7 +1199,7 @@ export ROLE_NAME="EnvRole"
 # Test that command line flags override environment variables
 ./azure-deployment-script.sh \
   --subscription-id="cli-subscription-id" \
-  --backend-url="https://cli.test.com" \
+  --salt-host="https://cli.test.com" \
   --bearer-token="cli-bearer-token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -1219,7 +1220,7 @@ export ROLE_NAME="EnvRole"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export APP_NAME="MixedEnvApp"
 export ROLE_NAME="MixedEnvRole"
@@ -1230,7 +1231,7 @@ export ROLE_NAME="MixedEnvRole"
 # Provide only mandatory parameters via flags, optional via environment
 ./azure-deployment-script.sh \
   --subscription-id="your-valid-test-subscription-id" \
-  --backend-url="https://httpbin.org/post" \
+  --salt-host="https://httpbin.org/post" \
   --bearer-token="test-valid-token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
@@ -1250,7 +1251,7 @@ export ROLE_NAME="MixedEnvRole"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1307,7 +1308,7 @@ unset ROLE_NAME
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="your-valid-test-subscription-id"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
@@ -1315,7 +1316,7 @@ export ATTEMPT_ID="$(uuidgen)"
 
 **Steps**:
 1. Note current directory files: `ls azure-deployment-*.log`
-2. Run: `./azure-deployment-script.sh --auto-approve`
+2. Run: `./subscription-level-deployment.sh --auto-approve`
 3. Check for new log file: `ls azure-deployment-*.log`
 4. Examine log content: `cat azure-deployment-[newest-file].log`
 
@@ -1332,14 +1333,14 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 export SUBSCRIPTION_ID="invalid-uuid-format"
-export BACKEND_URL="https://httpbin.org/post"
+export SALT_HOST="https://httpbin.org/post"
 export BEARER_TOKEN="test-valid-token"
 export INSTALLATION_ID="$(uuidgen)"
 export ATTEMPT_ID="$(uuidgen)"
 ```
 
 **Steps**:
-1. Run: `./azure-deployment-script.sh --auto-approve`
+1. Run: `./subscription-level-deployment.sh --auto-approve`
 2. Check log file content for error details
 
 **Expected Results**:
@@ -1468,7 +1469,7 @@ Use this checklist to track test execution:
   "subscription_id": "550e8400-e29b-41d4-a716-446655440000",
   "app_name": "TestApplication",
   "role_name": "TestCustomRole",
-  "backend_url": "https://httpbin.org/post",
+  "salt_host": "https://httpbin.org",
   "bearer_token": "valid-test-token-123",
   "installation_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "attempt_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
@@ -1540,7 +1541,8 @@ az role definition list --name "TestRole" --custom-role-only
 Use the provided cleanup utility:
 ```bash
 # Clean up resources with specific tag
-./azure/tests/utils/azure-verifier.sh --tag "CreatedBySalt-test" --cleanup
+# Manual cleanup using Azure CLI commands
+# Delete test resources by nonce pattern
 ```
 
 ## Test Environment Considerations
@@ -1609,8 +1611,8 @@ az account set --subscription "your-test-subscription-id"
 
 ---
 
-**Test Plan Version**: 2.0  
-**Last Updated**: 2025-01-01  
-**Script Version**: Updated to use named flags - all parameters now use --flag=value syntax instead of positional arguments  
-**Based on Automated Tests**: azure/tests/ directory  
+**Test Plan Version**: 2.1  
+**Last Updated**: 2025-10-05  
+**Script Version**: Updated for subscription-level deployment - all parameters now use --flag=value syntax instead of positional arguments  
+**Manual Testing**: Comprehensive validation procedures  
 **Estimated Execution Time**: 4-6 hours for full test suite

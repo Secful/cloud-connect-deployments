@@ -10,6 +10,9 @@ MAGENTA='\033[1;95m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
+# Constants
+ENDPOINT="v1/cloud-connect/scan/azure"
+
 # ============================================================================
 # LOGGING CONFIGURATION
 # ============================================================================
@@ -23,10 +26,10 @@ nonce=${full_nonce: -8}
 
 # Create log file with timestamp and nonce
 LOG_TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-LOG_FILE="azure-deployment-${nonce}-${LOG_TIMESTAMP}.log"
+LOG_FILE="subscription-level-deployment-${nonce}-${LOG_TIMESTAMP}.log"
 
 # Initialize log file
-echo "=== Azure Deployment Script Log ===" > "$LOG_FILE"
+echo "=== Subscription Level Deployment Script Log ===" > "$LOG_FILE"
 echo "Timestamp: $(date)" >> "$LOG_FILE"
 echo "Nonce: $nonce" >> "$LOG_FILE"
 echo "========================================" >> "$LOG_FILE"
@@ -347,24 +350,24 @@ validate_inputs() {
     # Validate parameters in the same order as they are assigned (positions 0-7)
     
     # Position 0: Subscription ID (UUID format)
-    validate_uuid "subscription ID" "$SUBSCRIPTION_ID"
+    validate_uuid "Subscription ID" "$SUBSCRIPTION_ID"
     
-    # Position 1: Backend URL format
-    validate_url "backend URL" "$BACKEND_URL"
+    # Position 1: Salt Host format
+    validate_url "Salt host" "$SALT_HOST"
     
     # Position 2: Bearer token (no format validation needed)
     
     # Position 3: Installation ID (UUID format)
-    validate_uuid "installation ID" "$INSTALLATION_ID"
+    validate_uuid "Installation ID" "$INSTALLATION_ID"
     
     # Position 4: Attempt ID (UUID format)
-    validate_uuid "attempt ID" "$ATTEMPT_ID"
+    validate_uuid "Attempt ID" "$ATTEMPT_ID"
     
     # Position 5: App name (alphanumeric, hyphens, underscores)
-    validate_name "app name" "$APP_NAME"
+    validate_name "App name" "$APP_NAME"
     
     # Position 6: Role name (alphanumeric, hyphens, underscores)
-    validate_name "role name" "$ROLE_NAME"
+    validate_name "Role name" "$ROLE_NAME"
     
     # Position 7: Created by (no validation needed - has default)
     
@@ -385,9 +388,9 @@ send_backend_status() {
     local deployment_status="$1"
     local error_message="$2"
     
-    # Skip if backend URL or token not provided
-    if [ -z "$BACKEND_URL" ] || [ -z "$BEARER_TOKEN" ]; then
-        log_warning "⚠️ Skipping backend status update - Backend URL or Bearer Token not provided"
+    # Skip if Salt host or token not provided
+    if [ -z "$SALT_HOST" ] || [ -z "$BEARER_TOKEN" ]; then
+        log_warning "⚠️ Skipping backend status update - Salt Host or Bearer Token not provided"
         return 0
     fi
     
@@ -413,11 +416,14 @@ send_backend_status() {
 EOF
 )
 
+    # Construct the full URL with endpoint
+    full_url="${SALT_HOST}/${ENDPOINT}"
+    
     if response=$(curl -s -w "\n%{http_code}" -X POST \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $BEARER_TOKEN" \
         -d "$backend_payload" \
-        "$BACKEND_URL" 2>&1); then
+        "$full_url" 2>&1); then
 
         http_code=$(echo "$response" | tail -n 1)
         response_body=$(echo "$response" | sed '$d')
@@ -483,7 +489,7 @@ show_help() {
     echo ""
     echo "Required parameters:"
     echo "  --subscription-id=<id>     Azure subscription ID"
-    echo "  --backend-url=<url>        Backend service URL"
+    echo "  --salt-host=<url>          Salt Host URL for status updates"
     echo "  --bearer-token=<token>     Authentication bearer token"
     echo "  --installation-id=<id>     Installation identifier"
     echo "  --attempt-id=<id>          Attempt identifier"
@@ -504,8 +510,8 @@ while [[ $# -gt 0 ]]; do
             SUBSCRIPTION_ID="${1#*=}"
             shift
             ;;
-        --backend-url=*)
-            BACKEND_URL="${1#*=}"
+        --salt-host=*)
+            SALT_HOST="${1#*=}"
             shift
             ;;
         --bearer-token=*)
@@ -562,8 +568,8 @@ missing_params=()
 if [ -z "$SUBSCRIPTION_ID" ]; then
     missing_params+=("--subscription-id")
 fi
-if [ -z "$BACKEND_URL" ]; then
-    missing_params+=("--backend-url")
+if [ -z "$SALT_HOST" ]; then
+    missing_params+=("--salt-host")
 fi
 if [ -z "$BEARER_TOKEN" ]; then
     missing_params+=("--bearer-token")

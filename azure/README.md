@@ -2,25 +2,31 @@
 
 This directory contains deployment and management scripts for Microsoft Azure integration with Salt Security.
 
+## Structure
+
+- `subscription/deployment/` - Subscription-level deployment scripts and resources
+- `subscription/deletion/` - Subscription-level deletion scripts and resources
+- `management-group/` - Management group-level scripts *(future)*
+
 ## Scripts
 
-### Deployment Script
-- **File**: `azure-deployment-script.sh`
+### Subscription-Level Deployment
+- **File**: `subscription/deployment/subscription-level-deployment.sh`
 - **Purpose**: Creates and configures Azure authentication components (Service Principal, Custom Role, etc.)
-- **Documentation**: [DEPLOYMENT.md](DEPLOYMENT.md)
+- **Documentation**: [subscription/deployment/SUBSCRIPTION_LEVEL_DEPLOYMENT.md](subscription/deployment/SUBSCRIPTION_LEVEL_DEPLOYMENT.md)
 
-### Deletion Script  
-- **File**: `azure-deletion-script.sh`
+### Subscription-Level Deletion
+- **File**: `subscription/deletion/subscription-level-deletion.sh`
 - **Purpose**: Removes Azure resources created by the deployment script
-- **Documentation**: [DELETION.md](DELETION.md) *(coming soon)*
+- **Documentation**: [subscription/deletion/SUBSCRIPTION_LEVEL_DELETION.md](subscription/deletion/SUBSCRIPTION_LEVEL_DELETION.md)
 
 ## Quick Start
 
 ### Deploy Azure Resources
 ```bash
-./azure-deployment-script.sh \
+./subscription/deployment/subscription-level-deployment.sh \
   --subscription-id=your-subscription-id \
-  --backend-url=https://api.saltsecurity.com/webhook \
+  --salt-host=https://api.saltsecurity.com \
   --bearer-token=your-token \
   --installation-id=your-installation-id \
   --attempt-id=your-attempt-id
@@ -28,24 +34,25 @@ This directory contains deployment and management scripts for Microsoft Azure in
 
 ### Delete Azure Resources
 ```bash
-./azure-deletion-script.sh [options]
+./subscription/deletion/subscription-level-deletion.sh \
+  --subscription-id=your-subscription-id \
+  --nonce=nonce-from-deployment \
+  --salt-host=https://api.saltsecurity.com \
+  --bearer-token=your-token
 ```
 
 ## Testing
 
-The `tests/` directory contains comprehensive test suites for validating script functionality:
-- Unit tests for individual components
-- Integration tests with Azure services
-- Mock environments for safe testing
-
-See [tests/README.md](tests/README.md) for testing documentation.
+Manual test plans are available to validate script functionality:
+- **[subscription/deployment/DEPLOYMENT_MANUAL_TEST_PLAN.md](subscription/deployment/DEPLOYMENT_MANUAL_TEST_PLAN.md)** - Manual deployment testing procedures
+- **[subscription/deletion/DELETION_MANUAL_TEST_PLAN.md](subscription/deletion/DELETION_MANUAL_TEST_PLAN.md)** - Manual deletion testing procedures
 
 ## Documentation
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment script guide
-- **[DELETION.md](DELETION.md)** - Deletion script guide *(coming soon)*
-- **[DEPLOYMENT_MANUAL_TEST_PLAN.md](DEPLOYMENT_MANUAL_TEST_PLAN.md)** - Manual testing procedures
-- **[DELETION_MANUAL_TEST_PLAN.md](DELETION_MANUAL_TEST_PLAN.md)** - Deletion testing procedures *(if exists)*
+- **[subscription/deployment/SUBSCRIPTION_LEVEL_DEPLOYMENT.md](subscription/deployment/SUBSCRIPTION_LEVEL_DEPLOYMENT.md)** - Complete deployment script guide
+- **[subscription/deletion/SUBSCRIPTION_LEVEL_DELETION.md](subscription/deletion/SUBSCRIPTION_LEVEL_DELETION.md)** - Complete deletion script guide
+- **[subscription/deployment/DEPLOYMENT_MANUAL_TEST_PLAN.md](subscription/deployment/DEPLOYMENT_MANUAL_TEST_PLAN.md)** - Manual deployment testing procedures
+- **[subscription/deletion/DELETION_MANUAL_TEST_PLAN.md](subscription/deletion/DELETION_MANUAL_TEST_PLAN.md)** - Manual deletion testing procedures
 
 ## Prerequisites
 

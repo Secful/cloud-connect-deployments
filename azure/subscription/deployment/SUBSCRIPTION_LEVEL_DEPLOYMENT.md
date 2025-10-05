@@ -1,6 +1,6 @@
-# Azure Deployment Script
+# Subscription Level Deployment Script
 
-This script automates the creation and configuration of Azure authentication components required for Salt Security integration with your Azure subscription.
+This script automates the creation and configuration of Azure authentication components required for Salt Security integration with your Azure subscription at the subscription level.
 
 ## Overview
 
@@ -10,7 +10,7 @@ The script creates a complete Azure authentication setup including:
 - **Service Principal** - Security identity for automated access
 - **Custom Role** - Specific permissions for API Management, Kubernetes, and Resource Groups
 - **Role Assignment** - Grants permissions to the service principal
-- **Salt Security Integration** - Reports deployment status to Salt Security backend
+- **Salt Security Integration** - Reports deployment status to Salt Security host
 
 ## Prerequisites
 
@@ -29,9 +29,9 @@ The script creates a complete Azure authentication setup including:
 
 ### Basic Usage
 ```bash
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id=12345678-1234-1234-1234-123456789012 \
-  --backend-url=https://api.saltsecurity.com/webhook \
+  --salt-host=https://api.saltsecurity.com \
   --bearer-token=your-bearer-token \
   --installation-id=87654321-4321-4321-4321-210987654321 \
   --attempt-id=11111111-2222-3333-4444-555555555555
@@ -39,9 +39,9 @@ The script creates a complete Azure authentication setup including:
 
 ### With Optional Parameters
 ```bash
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id=12345678-1234-1234-1234-123456789012 \
-  --backend-url=https://api.saltsecurity.com/webhook \
+  --salt-host=https://api.saltsecurity.com \
   --bearer-token=your-bearer-token \
   --installation-id=87654321-4321-4321-4321-210987654321 \
   --attempt-id=11111111-2222-3333-4444-555555555555 \
@@ -53,7 +53,7 @@ The script creates a complete Azure authentication setup including:
 
 ### Help
 ```bash
-./azure-deployment-script.sh --help
+./subscription-level-deployment.sh --help
 ```
 
 ## Parameters
@@ -62,8 +62,8 @@ The script creates a complete Azure authentication setup including:
 | Parameter | Description | Format |
 |-----------|-------------|---------|
 | `--subscription-id` | Azure subscription ID | UUID format |
-| `--backend-url` | Backend service URL for status updates | HTTP/HTTPS URL |
-| `--bearer-token` | Authentication token for backend communication | String |
+| `--salt-host` | Salt host URL for status updates (will be combined with endpoint path) | HTTP/HTTPS URL |
+| `--bearer-token` | Authentication token for Salt host communication | String |
 | `--installation-id` | Installation identifier | UUID format |
 | `--attempt-id` | Deployment attempt identifier | UUID format |
 
@@ -97,7 +97,7 @@ All created resources include a unique 8-character nonce for uniqueness:
 
 ## Logging
 
-The script creates a detailed log file: `azure-deployment-{nonce}-{timestamp}.log`
+The script creates a detailed log file: `subscription-level-deployment-{nonce}-{timestamp}.log`
 
 Log levels include:
 - **INFO** - General information and progress
@@ -107,11 +107,14 @@ Log levels include:
 ## Error Handling & Cleanup
 
 ### Automatic Cleanup
-On failure or interruption (Ctrl+C), the script automatically cleans up created resources in reverse order:
-1. Role assignments
-2. Custom role definitions
-3. Service principal
-4. Azure AD application
+On failure or interruption (Ctrl+C), the script automatically cleans up **only resources created during this run** in reverse order:
+1. Role assignments (for the custom role created this run)
+2. Custom role definitions (only if created this run)  
+3. Service principal (only if created this run)
+4. Azure AD application (only if created this run)
+5. Temporary files (custom-role.json)
+
+**Note**: The script tracks which resources were created during the current execution and only cleans up those resources, not pre-existing ones.
 
 ### Signal Handling
 - **SIGINT** (Ctrl+C) - Graceful cleanup and exit
@@ -142,6 +145,7 @@ Client Secret: [REDACTED]
 - **Save the client secret immediately** - it cannot be retrieved again
 - The script changes your Azure CLI context during service principal verification
 - Run `az login` again after script completion if you need to use Azure CLI
+- On successful deployment, created resources are kept (not cleaned up)
 
 ## Security Considerations
 
@@ -150,6 +154,25 @@ Client Secret: [REDACTED]
 - Secrets are not logged to console (only to secure log file)
 - Backend communication uses bearer token authentication
 - Resources are scoped to specific subscription only
+
+## Service Principal Verification
+
+After successful resource creation, the script performs authentication verification:
+- Tests service principal login using created credentials
+- Retries up to 10 times with 30-second intervals
+- **Important**: This temporarily changes your Azure CLI login context
+- You must run `az login` again after script completion
+
+## Backend Status Updates
+
+The script sends three status updates to the Salt host:
+1. **"Initiated"** - When deployment begins
+2. **"Succeeded"/"Failed"** - Based on final outcome  
+3. **"Failed"** - On interruption (SIGINT/SIGTERM)
+
+Requests are sent to the full URL constructed by combining the Salt host with the endpoint path `v1/cloud-connect/scan/azure`.
+
+Status updates include connection details (client ID, tenant ID, client secret, subscription ID).
 
 ## Troubleshooting
 
@@ -165,8 +188,9 @@ Client Secret: [REDACTED]
    - Ensure you can create Azure AD applications
 
 3. **Service principal verification fails**
-   - Azure AD propagation can take time
-   - Script retries automatically with backoff
+   - Azure AD propagation can take time (up to 5 minutes)
+   - Script retries up to 10 times with 30-second intervals
+   - If verification fails after all retries, deployment is considered failed
 
 4. **Resource already exists**
    - Script uses unique nonce to prevent conflicts
