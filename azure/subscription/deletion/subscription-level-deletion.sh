@@ -70,7 +70,7 @@ check_dependencies() {
             exit 1
         fi
     done
-    log_info "✅ All dependencies found" "${GREEN}"
+    log_info "✅  All dependencies found" "${GREEN}"
     log_info ""
 }
 
@@ -101,7 +101,7 @@ check_azure_auth() {
     # Set the subscription as current
     az account set --subscription "$SUBSCRIPTION_ID" &>/dev/null
     current_sub=$(az account show --query name -o tsv 2>/dev/null)
-    log_info "✅ Authenticated to Azure subscription: $current_sub" "${GREEN}"
+    log_info "✅  Authenticated to Azure subscription: $current_sub" "${GREEN}"
     log_info ""
 }
 
@@ -155,7 +155,7 @@ validate_inputs() {
         validate_url "Salt Host" "$SALT_HOST"
     fi
     
-    log_info "✅ All input parameters validated" "${GREEN}"
+    log_info "✅  All input parameters validated" "${GREEN}"
     log_info ""
 }
 
@@ -191,7 +191,7 @@ send_backend_deletion() {
         response_body=$(echo "$response" | sed '$d')
 
         if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
-            log_info "✅ Successfully sent deletion request to backend (HTTP $http_code)" "${GREEN}"
+            log_info "✅  Successfully sent deletion request to backend (HTTP $http_code)" "${GREEN}"
             if [ -n "$response_body" ]; then
                 log_info "Backend response: $response_body"
             fi
@@ -258,35 +258,35 @@ discover_resources() {
             found_app_name=$(echo "$apps_json" | jq -r '.[0].displayName // empty')
             
             if [ -n "$found_app_id" ] && [ "$found_app_id" != "null" ]; then
-                log_info "✅ Found Azure AD Application: $found_app_name (ID: $found_app_id)" "${GREEN}"
+                log_info "✅  Found Azure AD Application: $found_app_name (ID: $found_app_id)" "${GREEN}"
                 
                 # Verify it has the correct tag (if possible - tags might not be searchable)
                 expected_tag="CreatedBySalt-${NONCE}"
                 if app_details=$(az ad app show --id "$found_app_id" --query "tags" -o json 2>/dev/null); then
                     if echo "$app_details" | jq -e --arg tag "$expected_tag" 'index($tag)' >/dev/null 2>&1; then
-                        log_info "   ✅ Confirmed: Application has expected tag '$expected_tag'" "${GREEN}"
+                        log_info "Confirmed: Application has expected tag '$expected_tag'" "${GREEN}"
                     else
-                        log_warning "   Warning: Application does not have expected tag '$expected_tag'"
-                        log_warning "   This might not be a Salt-created resource. Proceed with caution."
+                        log_warning "Warning: Application does not have expected tag '$expected_tag'"
+                        log_warning "This might not be a Salt-created resource. Proceed with caution."
                     fi
                 fi
                 
                 # 2. Find associated Service Principal
                 log_info ""
-                log_info "🔍 Searching for associated service principal..." "${CYAN}"
+                log_info "Searching for associated service principal..." "${CYAN}"
                 if sp_json=$(az ad sp show --id "$found_app_id" --query "{id: id, appId: appId}" 2>/dev/null); then
                     found_sp_object_id=$(echo "$sp_json" | jq -r '.id // empty')
                     if [ -n "$found_sp_object_id" ] && [ "$found_sp_object_id" != "null" ]; then
-                        log_info "✅ Found Service Principal: Object ID $found_sp_object_id" "${GREEN}"
+                        log_info "✅  Found Service Principal: Object ID $found_sp_object_id" "${GREEN}"
                     fi
                 else
-                    log_warning "   No service principal found for application $found_app_id"
+                    log_warning "No service principal found for application $found_app_id"
                 fi
             else
-                log_warning "   Application found but could not extract App ID"
+                log_warning "Application found but could not extract App ID"
             fi
         else
-            log_warning "   No Azure AD applications found with nonce suffix '-$NONCE'"
+            log_warning "No Azure AD applications found with nonce suffix '-$NONCE'"
         fi
     else
         log_error "Failed to search for Azure AD applications"
@@ -295,7 +295,7 @@ discover_resources() {
     
     # 3. Search for Custom Role with nonce suffix
     log_info ""
-    log_info "🔍 Searching for custom roles with nonce suffix..." "${CYAN}"
+    log_info "Searching for custom roles with nonce suffix..." "${CYAN}"
     
     if roles_json=$(az role definition list --scope "/subscriptions/$found_subscription_id" --query "[?contains(roleName, '-$NONCE')]" 2>/dev/null); then
         if [ "$roles_json" != "[]" ] && [ -n "$roles_json" ]; then
@@ -304,12 +304,12 @@ discover_resources() {
             found_role_name=$(echo "$roles_json" | jq -r '.[0].roleName // empty')
             
             if [ -n "$found_role_id" ] && [ "$found_role_id" != "null" ]; then
-                log_info "✅ Found Custom Role: $found_role_name (ID: $found_role_id)" "${GREEN}"
+                log_info "✅  Found Custom Role: $found_role_name (ID: $found_role_id)" "${GREEN}"
             else
-                log_warning "   Role found but could not extract Role ID"
+                log_warning "Role found but could not extract Role ID"
             fi
         else
-            log_warning "   No custom roles found with nonce suffix '-$NONCE'"
+            log_warning "No custom roles found with nonce suffix '-$NONCE'"
         fi
     else
         log_error "Failed to search for custom roles"
@@ -323,17 +323,17 @@ discover_resources() {
     resources_to_delete=0
     
     if [ -n "$found_app_id" ]; then
-        log_info "   Azure AD Application: $found_app_name ($found_app_id)" "${RED}"
+        log_info "Azure AD Application: $found_app_name ($found_app_id)" "${YELLOW}"
         resources_to_delete=$((resources_to_delete + 1))
     fi
     
     if [ -n "$found_sp_object_id" ]; then
-        log_info "   Service Principal: $found_sp_object_id" "${RED}"
+        log_info "Service Principal: $found_sp_object_id" "${YELLOW}"
         resources_to_delete=$((resources_to_delete + 1))
     fi
     
     if [ -n "$found_role_id" ]; then
-        log_info "   Custom Role: $found_role_name ($found_role_id)" "${RED}"
+        log_info "Custom Role: $found_role_name ($found_role_id)" "${YELLOW}"
         resources_to_delete=$((resources_to_delete + 1))
     fi
     
@@ -383,7 +383,7 @@ delete_resources() {
     # Note: Role assignments are automatically deleted when the role definition is deleted,
     # but we'll check for any explicit assignments to be thorough
     if [ -n "$found_sp_object_id" ] && [ -n "$found_role_id" ]; then
-        log_info "🗑️ Checking for role assignments to delete..." "${CYAN}"
+        log_info "Checking for role assignments to delete..." "${CYAN}"
         
         # Get role assignments for the service principal with the custom role
         if assignments=$(az role assignment list \
@@ -399,11 +399,11 @@ delete_resources() {
                 # Delete each role assignment
                 echo "$assignments" | jq -r '.[].id' | while read -r assignment_id; do
                     if [ -n "$assignment_id" ]; then
-                        log_info "   Deleting role assignment: $assignment_id" "${YELLOW}"
+                        log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
                         if az role assignment delete --ids "$assignment_id" >/dev/null 2>&1; then
-                            log_info "   ✅ Role assignment deleted successfully" "${GREEN}"
+                            log_info "✅  Role assignment deleted successfully" "${GREEN}"
                         else
-                            log_warning "   Failed to delete role assignment: $assignment_id"
+                            log_warning "Failed to delete role assignment: $assignment_id"
                             deletion_errors=true
                         fi
                     fi
@@ -419,14 +419,14 @@ delete_resources() {
     
     # Step 2: Delete custom role definition
     if [ -n "$found_role_id" ]; then
-        log_info "🗑️ Deleting custom role definition..." "${CYAN}"
-        log_info "   Role: $found_role_name" "${YELLOW}"
-        log_info "   ID: $found_role_id" "${YELLOW}"
+        log_info "Deleting custom role definition..." "${CYAN}"
+        log_info "Role: $found_role_name" "${YELLOW}"
+        log_info "ID: $found_role_id" "${YELLOW}"
         
         if az role definition delete --name "$found_role_name" --scope "/subscriptions/$found_subscription_id" >/dev/null 2>&1; then
-            log_info "   ✅ Custom role definition deleted successfully" "${GREEN}"
+            log_info "✅  Custom role definition deleted successfully" "${GREEN}"
         else
-            log_error "   Failed to delete custom role definition"
+            log_error "Failed to delete custom role definition"
             deletion_errors=true
         fi
         log_info ""
@@ -434,13 +434,13 @@ delete_resources() {
     
     # Step 3: Delete service principal
     if [ -n "$found_sp_object_id" ]; then
-        log_info "🗑️ Deleting service principal..." "${CYAN}"
-        log_info "   Object ID: $found_sp_object_id" "${YELLOW}"
+        log_info "Deleting service principal..." "${CYAN}"
+        log_info "Object ID: $found_sp_object_id" "${YELLOW}"
         
         if az ad sp delete --id "$found_sp_object_id" >/dev/null 2>&1; then
-            log_info "   ✅ Service principal deleted successfully" "${GREEN}"
+            log_info "✅  Service principal deleted successfully" "${GREEN}"
         else
-            log_error "   Failed to delete service principal"
+            log_error "Failed to delete service principal"
             deletion_errors=true
         fi
         log_info ""
@@ -448,15 +448,15 @@ delete_resources() {
     
     # Step 4: Delete Azure AD application (this also deletes client secrets)
     if [ -n "$found_app_id" ]; then
-        log_info "🗑️ Deleting Azure AD application..." "${CYAN}"
-        log_info "   Application: $found_app_name" "${YELLOW}"
-        log_info "   ID: $found_app_id" "${YELLOW}"
+        log_info "Deleting Azure AD application..." "${CYAN}"
+        log_info "Application: $found_app_name" "${YELLOW}"
+        log_info "ID: $found_app_id" "${YELLOW}"
         
         if az ad app delete --id "$found_app_id" >/dev/null 2>&1; then
-            log_info "   ✅ Azure AD application deleted successfully" "${GREEN}"
-            log_info "   (Client secrets were automatically deleted with the application)" "${GREEN}"
+            log_info "✅  Azure AD application deleted successfully" "${GREEN}"
+            log_info "(Client secrets were automatically deleted with the application)" "${GREEN}"
         else
-            log_error "   Failed to delete Azure AD application"
+            log_error "Failed to delete Azure AD application"
             deletion_errors=true
         fi
         log_info ""
@@ -464,10 +464,10 @@ delete_resources() {
     
     # Return status based on whether any errors occurred
     if [ "$deletion_errors" = true ]; then
-        log_error "Some resources could not be deleted. Check the log for details."
+        log_error "Some resources could not be deleted. Check log file: $LOG_FILE"
         return 1
     else
-        log_info "✅ All discovered resources deleted successfully" "${GREEN}"
+        log_info "✅  All discovered resources deleted successfully" "${GREEN}"
         return 0
     fi
 }
@@ -490,7 +490,6 @@ show_help() {
     echo "  --bearer-token=<token>     Authentication bearer token"
     echo ""
     echo "Optional parameters:"
-    echo "  --deleted-by=<name>        Deleted by identifier (default: Salt Security)"
     echo "  --auto-approve             Skip confirmation prompts"
     echo "  --dry-run                  Identify resources without deleting them"
     echo "  --help                     Show this help message"
@@ -515,10 +514,6 @@ while [[ $# -gt 0 ]]; do
             BEARER_TOKEN="${1#*=}"
             shift
             ;;
-        --deleted-by=*)
-            DELETED_BY="${1#*=}"
-            shift
-            ;;
         --auto-approve)
             AUTO_APPROVE=true
             shift
@@ -532,7 +527,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
-            echo "Error: Unknown option: $1" >&2
+            log_error "Unknown option: $1"
             show_help
             exit 1
             ;;
@@ -555,13 +550,10 @@ if [ -z "$BEARER_TOKEN" ]; then
 fi
 
 if [ ${#missing_params[@]} -gt 0 ]; then
-    log_error "Error: Missing required parameters: ${missing_params[*]}" >&2
+    log_error "Missing required parameters: ${missing_params[*]}"
     show_help
     exit 1
 fi
-
-# Set default values for DELETED_BY if not provided
-DELETED_BY="${DELETED_BY:-Salt Security}"
 
 # Create log file with nonce now that we have it
 LOG_FILE="subscription-level-deletion-${NONCE}-${LOG_TIMESTAMP}.log"
@@ -573,6 +565,11 @@ echo "========================================" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
 
 # Now that logging is set up, check dependencies and log everything
+log_info ""
+log_info "Azure Deletion Script starting..." "${GREEN}${BOLD}"
+log_info "Log file: $LOG_FILE" "${CYAN}"
+log_info ""
+
 check_dependencies
 
 log_info ""
@@ -621,13 +618,14 @@ else
         log_info ""
     else
         log_info "Deletion cancelled by user." "${YELLOW}"
+        log_info "Check log file: $LOG_FILE" "${CYAN}"
         exit 0
     fi
 fi
 
 # Discover resources by nonce
 if ! discover_resources; then
-    log_error "Resource discovery failed. Exiting."
+    log_error "Resource discovery failed. Check log file: $LOG_FILE"
     exit 1
 fi
 
@@ -639,13 +637,33 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
+# Final confirmation before deletion
+if [ "$AUTO_APPROVE" = true ]; then
+    log_info "Auto-approve mode enabled - proceeding with deletion..." "${GREEN}${BOLD}"
+    log_info ""
+else
+    log_info ""
+    echo -e "${YELLOW}Do you want to proceed with deleting the discovered resources? (y/n): ${NC}\\c"
+    read -r response
+    log_info ""
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        log_info "User confirmed - proceeding with deletion..." "${GREEN}${BOLD}"
+        log_info ""
+    else
+        log_info "Deletion cancelled by user." "${YELLOW}"
+        log_info "Check log file: $LOG_FILE" "${CYAN}"
+        exit 0
+    fi
+fi
+
 # Delete discovered resources
 deletion_success=true
 if ! delete_resources; then
     deletion_success=false
     log_error "Resource deletion completed with errors."
 else
-    log_info "✅ All resources deleted successfully"
+    log_info "✅  All resources deleted successfully"
 fi
 
 # 7. Salt Security Integration - Final status and verification
@@ -671,9 +689,12 @@ log_info ""
 if [ "$deletion_success" = true ]; then
     log_info "=== DELETION COMPLETED SUCCESSFULLY ===" "${GREEN}${BOLD}"
     log_info "All discovered resources with nonce '$NONCE' have been deleted." "${GREEN}"
+    log_info ""
+    log_info "✅  Script completed successfully. Log file: $LOG_FILE" "${GREEN}"
 else
     log_error "=== DELETION COMPLETED WITH ERRORS ==="
     log_error "Some resources could not be deleted. Check the log for details."
+    log_error "Script completed with errors. Check log file: $LOG_FILE"
 fi
 
 log_info ""

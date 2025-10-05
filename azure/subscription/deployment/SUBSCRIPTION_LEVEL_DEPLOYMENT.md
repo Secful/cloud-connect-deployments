@@ -72,7 +72,7 @@ The script creates a complete Azure authentication setup including:
 |-----------|-------------|---------|
 | `--app-name` | Azure AD application name | SaltAppServicePrincipal |
 | `--role-name` | Custom role name | SaltCustomAppRole |
-| `--created-by` | Creator identifier | Salt Security |
+| `--created-by` | Creator identifier (quote values with spaces) | Salt Security |
 | `--auto-approve` | Skip confirmation prompts | false |
 
 ## Interactive Prompts

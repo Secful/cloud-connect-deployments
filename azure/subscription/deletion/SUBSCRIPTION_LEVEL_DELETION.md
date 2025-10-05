@@ -42,7 +42,6 @@ The script discovers and deletes Azure resources created during deployment inclu
   --nonce=a1b2c3d4 \
   --salt-host=https://api.saltsecurity.com \
   --bearer-token=your-bearer-token \
-  --deleted-by="My Organization" \
   --auto-approve
 ```
 
@@ -74,7 +73,6 @@ The script discovers and deletes Azure resources created during deployment inclu
 ### Optional Parameters
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `--deleted-by` | Deleted by identifier | Salt Security |
 | `--auto-approve` | Skip confirmation prompts | false |
 | `--dry-run` | Identify resources without deleting them | false |
 
@@ -88,10 +86,12 @@ The script discovers resources by searching for the unique nonce suffix:
 
 ### Discovery Process
 1. Validates Azure CLI authentication and subscription access
-2. Searches for Azure AD applications with nonce suffix
-3. Locates associated service principal using application ID
-4. Searches for custom roles with nonce suffix
-5. Summarizes all discovered resources before deletion
+2. Initial confirmation prompt (unless `--auto-approve` is used)
+3. Searches for Azure AD applications with nonce suffix
+4. Locates associated service principal using application ID
+5. Searches for custom roles with nonce suffix
+6. Summarizes all discovered resources
+7. Final confirmation prompt before deletion (unless `--auto-approve` is used)
 
 ## Deletion Process
 
@@ -106,7 +106,7 @@ Resources are deleted in proper dependency order to avoid conflicts:
 - **Nonce Validation**: Only deletes resources matching the exact nonce
 - **Tag Verification**: Warns if resources lack expected Salt Security tags
 - **Dry Run Mode**: Identifies resources without performing deletions
-- **Interactive Confirmation**: Prompts for approval unless `--auto-approve` is used
+- **Dual Confirmation System**: Two confirmation prompts - before discovery and after seeing exactly what will be deleted (unless `--auto-approve` is used)
 
 ## Logging
 
@@ -149,14 +149,25 @@ Total resources to be deleted: 3
 
 ## Interactive Prompts
 
-Unless `--auto-approve` is specified, the script prompts for confirmation:
+Unless `--auto-approve` is specified, the script provides two confirmation prompts for enhanced safety:
+
+### Initial Confirmation (Before Resource Discovery)
 ```
 Do you want to proceed with the deletion? (y/n):
 ```
 
-Response options:
-- **y** - Proceeds with deletion
+### Final Confirmation (After Resource Discovery)
+After discovering resources, the script shows exactly what will be deleted and asks for final confirmation:
+```
+Do you want to proceed with deleting the discovered resources? (y/n):
+```
+
+**Response options for both prompts:**
+- **y** - Proceeds to next step or deletion
 - **n** - Cancels deletion with "Deletion cancelled by user" message
+
+**Auto-Approve Behavior:**
+When `--auto-approve` is used, both confirmation prompts are automatically bypassed, and the script proceeds directly through resource discovery to deletion.
 
 ## Backend Status Updates
 

@@ -24,7 +24,7 @@ This manual test plan provides step-by-step instructions for manually validating
 The script uses named flags for all parameters:
 
 ```bash
-./subscription-level-deletion.sh --subscription-id=<id> --nonce=<nonce> --salt-host=<url> --bearer-token=<token> [--deleted-by=<name>] [--auto-approve] [--dry-run] [--help]
+./subscription-level-deletion.sh --subscription-id=<id> --nonce=<nonce> --salt-host=<url> --bearer-token=<token> [--auto-approve] [--dry-run] [--help]
 ```
 
 **Required parameters:**
@@ -34,7 +34,6 @@ The script uses named flags for all parameters:
 - `--bearer-token=<token>` - Authentication bearer token
 
 **Optional parameters:**
-- `--deleted-by=<name>` - Deleted by identifier (default: Salt Security)
 - `--auto-approve` - Skip confirmation prompts
 - `--dry-run` - Identify resources without deleting them
 - `--help` - Show usage information
@@ -47,7 +46,6 @@ export SUBSCRIPTION_ID="your-test-subscription-id"
 export NONCE="a1b2c3d4"  # 8-character hex string from deployment
 export SALT_HOST="https://api.test.com"  # Required (will be combined with endpoint path)
 export BEARER_TOKEN="test-token-123"              # Required
-export DELETED_BY="Manual Test User"              # Optional
 ```
 
 ## Test Categories and Scenarios
@@ -188,7 +186,7 @@ export DELETED_BY="Manual Test User"              # Optional
 **Setup**:
 First create resources using deployment script:
 ```bash
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 # Note the nonce from the output or log file
 ```
 
@@ -244,7 +242,7 @@ First create resources using deployment script:
 **Setup**:
 ```bash
 # First create resources
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 # Note the nonce and use it for deletion
 export TEST_NONCE="from-deployment-output"
 ```
@@ -421,17 +419,51 @@ export BEARER_TOKEN="invalid-token"
 - No interactive prompts for deletion confirmation
 - Deletion proceeds automatically
 
-#### MODE-003: Interactive Mode
-**Objective**: Test user confirmation prompts.
+#### MODE-003: Interactive Mode (Dual Confirmation System)
+**Objective**: Test user confirmation prompts with dual confirmation system.
 
 **Steps**:
 1. Run script without `--auto-approve` flag
-2. Test both "y" and "n" responses
+2. Test both confirmation prompts:
+   - Initial confirmation before resource discovery
+   - Final confirmation after resource discovery
+3. Test both "y" and "n" responses for each prompt
 
 **Expected Results**:
-- Script prompts for deletion confirmation
-- "y" response proceeds with deletion
-- "n" response cancels with "Deletion cancelled by user" message
+- **First prompt**: "Do you want to proceed with the deletion? (y/n):"
+  - "y" response proceeds to resource discovery
+  - "n" response cancels with "Deletion cancelled by user" message
+- **Second prompt**: "Do you want to proceed with deleting the discovered resources? (y/n):"
+  - Only appears after successful resource discovery
+  - Shows exactly what resources will be deleted
+  - "y" response proceeds with actual deletion
+  - "n" response cancels with "Deletion cancelled by user" message
+- Both prompts are skipped when `--auto-approve` is used
+
+#### MODE-004: Dual Confirmation Edge Cases
+**Objective**: Test edge cases in the dual confirmation system.
+
+**Test Case A - Cancel at First Prompt**:
+1. Run script without `--auto-approve`
+2. Answer "n" to first prompt
+3. Verify no resource discovery occurs
+
+**Test Case B - Cancel at Second Prompt**:
+1. Run script without `--auto-approve`
+2. Answer "y" to first prompt
+3. Let resource discovery complete
+4. Answer "n" to second prompt
+5. Verify no resources are deleted
+
+**Test Case C - Auto-Approve Bypasses Both**:
+1. Run script with `--auto-approve`
+2. Verify no prompts appear
+3. Verify script proceeds directly through both discovery and deletion
+
+**Expected Results**:
+- **Case A**: Script exits after first "n", no Azure API calls made
+- **Case B**: Resources discovered but not deleted, script exits gracefully
+- **Case C**: Both confirmations bypassed, script proceeds automatically
 
 ### 9. Edge Cases and Boundary Tests
 
@@ -514,7 +546,8 @@ Use this checklist to track test execution:
 ### Special Mode Tests
 - [ ] MODE-001: Dry-run mode
 - [ ] MODE-002: Auto-approve mode
-- [ ] MODE-003: Interactive mode
+- [ ] MODE-003: Interactive mode (dual confirmation)
+- [ ] MODE-004: Dual confirmation edge cases
 
 ### Edge Case Tests
 - [ ] EDGE-001: Malformed nonce in resource names
@@ -529,8 +562,7 @@ Use this checklist to track test execution:
   "subscription_id": "550e8400-e29b-41d4-a716-446655440000",
   "nonce": "a1b2c3d4",
   "salt_host": "https://httpbin.org",
-  "bearer_token": "valid-test-token-123",
-  "created_by": "Manual Test User"
+  "bearer_token": "valid-test-token-123"
 }
 ```
 
@@ -587,7 +619,7 @@ export APP_NAME="TestDeletionApp"
 export ROLE_NAME="TestDeletionRole"
 
 # Run deployment to create resources
-./azure-deployment-script.sh --auto-approve
+./subscription-level-deployment.sh --auto-approve
 
 # Use the nonce from deployment log for deletion testing
 ```

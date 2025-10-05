@@ -252,15 +252,15 @@ export ROLE_NAME="Role@Invalid!Characters"
 **Test Cases**:
 ```bash
 # Test missing subscription ID:
-./azure-deployment-script.sh \
-  --salt-host="https://api.test.com/webhook" \
+./subscription-level-deployment.sh \
+  --salt-host="https://api.test.com" \
   --bearer-token="test-token" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
 # Test missing backend URL:
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
   --bearer-token="test-token" \
   --installation-id="$(uuidgen)" \
@@ -268,31 +268,31 @@ export ROLE_NAME="Role@Invalid!Characters"
   --auto-approve
 
 # Test missing bearer token:
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
-  --salt-host="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com" \
   --installation-id="$(uuidgen)" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
 # Test missing installation ID:
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
-  --salt-host="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com" \
   --bearer-token="test-token" \
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
 # Test missing attempt ID:
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
-  --salt-host="https://api.test.com/webhook" \
+  --salt-host="https://api.test.com" \
   --bearer-token="test-token" \
   --installation-id="$(uuidgen)" \
   --auto-approve
 
 # Test empty parameters (passed as empty values):
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="" \
   --salt-host="https://api.test.com" \
   --bearer-token="token" \
@@ -300,7 +300,7 @@ export ROLE_NAME="Role@Invalid!Characters"
   --attempt-id="$(uuidgen)" \
   --auto-approve
 
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
   --salt-host="" \
   --bearer-token="token" \
@@ -1115,7 +1115,7 @@ export ATTEMPT_ID="$(uuidgen)"
 **Setup**:
 ```bash
 # Test with empty bearer token flag
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="$(uuidgen)" \
   --salt-host="https://httpbin.org/post" \
   --bearer-token="" \
@@ -1197,7 +1197,7 @@ export ROLE_NAME="EnvRole"
 **Test Cases**:
 ```bash
 # Test that command line flags override environment variables
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="cli-subscription-id" \
   --salt-host="https://cli.test.com" \
   --bearer-token="cli-bearer-token" \
@@ -1229,7 +1229,7 @@ export ROLE_NAME="MixedEnvRole"
 **Test Cases**:
 ```bash
 # Provide only mandatory parameters via flags, optional via environment
-./azure-deployment-script.sh \
+./subscription-level-deployment.sh \
   --subscription-id="your-valid-test-subscription-id" \
   --salt-host="https://httpbin.org/post" \
   --bearer-token="test-valid-token" \
@@ -1261,7 +1261,7 @@ unset ROLE_NAME
 ```
 
 **Steps**:
-1. Run: `./azure-deployment-script.sh` (without --auto-approve)
+1. Run: `./subscription-level-deployment.sh` (without --auto-approve)
 2. When prompted for APP_NAME, provide: "InteractiveApp"
 3. When prompted for ROLE_NAME, provide: "InteractiveRole"
 4. When prompted "Do you want to proceed? (y/n):", type "y"
@@ -1277,7 +1277,7 @@ unset ROLE_NAME
 **Objective**: Test user cancellation during interactive mode.
 
 **Steps**:
-1. Run: `./azure-deployment-script.sh`
+1. Run: `./subscription-level-deployment.sh`
 2. Provide inputs for APP_NAME and ROLE_NAME when prompted
 3. When prompted "Do you want to proceed? (y/n):", type "n"
 
@@ -1291,7 +1291,7 @@ unset ROLE_NAME
 **Objective**: Test using default values in interactive mode.
 
 **Steps**:
-1. Run: `./azure-deployment-script.sh`
+1. Run: `./subscription-level-deployment.sh`
 2. Press Enter (accept defaults) for APP_NAME and ROLE_NAME prompts
 3. Type "y" when prompted to proceed
 

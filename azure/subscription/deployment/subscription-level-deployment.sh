@@ -79,7 +79,7 @@ check_dependencies() {
             exit 1
         fi
     done
-    log_info "✅ All dependencies found" "${GREEN}"
+    log_info "✅  All dependencies found" "${GREEN}"
     log_info ""
 }
 
@@ -104,9 +104,9 @@ cleanup() {
         
         # Delete resources in reverse order of creation to avoid dependency issues
         # Step 1: Delete role assignments first (required before role definition can be deleted)
+        log_info ""
+        log_info "Checking for role assignments related to roles created during this deployment..." "${YELLOW}"
         if [ "$role_created_this_run" = true ] && ([ -n "$role_definition_id" ] || [ -n "$ROLE_NAME_WITH_NONCE" ]); then
-            log_info ""
-            log_info "Checking for role assignments to delete..." "${YELLOW}"
             
             # Get the role ID if we don't have it yet
             local cleanup_role_id="$role_definition_id"
@@ -135,7 +135,7 @@ cleanup() {
                                 log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
                                 if az role assignment delete --ids "$assignment_id" >/dev/null 2>&1; then
                                     if [ "$is_interrupt" = true ]; then
-                                        log_info "✅ Role assignment deleted successfully" "${GREEN}"
+                                        log_info "✅  Role assignment deleted successfully" "${GREEN}"
                                     else
                                         log_info "Role assignment deleted successfully" "${YELLOW}"
                                     fi
@@ -146,7 +146,7 @@ cleanup() {
                         done
                     else
                         if [ "$is_interrupt" = true ]; then
-                            log_info "✅ No role assignments found for this role - nothing to clean up" "${GREEN}"
+                            log_info "✅  No role assignments found for this role - nothing to clean up" "${GREEN}"
                         else
                             log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
                         fi
@@ -155,6 +155,8 @@ cleanup() {
                     log_warning "Could not check for role assignments"
                 fi
             fi
+        else
+            log_info "No custom role was created during this deployment - skipping role assignment cleanup" "${YELLOW}"
         fi
         
         # Step 2: Delete custom role (now that assignments are gone)
@@ -163,7 +165,7 @@ cleanup() {
             log_info "Custom role was created. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
             if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
-                    log_info "✅ Custom role deleted successfully" "${GREEN}"
+                    log_info "✅  Custom role deleted successfully" "${GREEN}"
                 else
                     log_info "Custom role deleted successfully" "${YELLOW}"
                 fi
@@ -181,7 +183,7 @@ cleanup() {
                         log_info "Role ID: $role_definition_id" "${YELLOW}"
                         if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
                             if [ "$is_interrupt" = true ]; then
-                                log_info "✅ Custom role deleted successfully" "${GREEN}"
+                                log_info "✅  Custom role deleted successfully" "${GREEN}"
                             else
                                 log_info "Custom role deleted successfully" "${YELLOW}"
                             fi
@@ -215,7 +217,7 @@ cleanup() {
             log_info "Service principal was created. Deleting service principal for app: $APP_NAME_WITH_NONCE" "${YELLOW}"
             if sp_delete_result=$(az ad sp delete --id "$sp_object_id" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
-                    log_info "✅ Service principal deleted successfully" "${GREEN}"
+                    log_info "✅  Service principal deleted successfully" "${GREEN}"
                 else
                     log_info "Service principal deleted successfully" "${YELLOW}"
                 fi
@@ -233,7 +235,7 @@ cleanup() {
             log_info "Application was created. Deleting Azure AD application (and client secret): $APP_NAME_WITH_NONCE" "${YELLOW}"
             if app_delete_result=$(az ad app delete --id "$app_id" 2>&1); then
                 if [ "$is_interrupt" = true ]; then
-                    log_info "✅ Azure AD application deleted successfully" "${GREEN}"
+                    log_info "✅  Azure AD application deleted successfully" "${GREEN}"
                 else
                     log_info "Azure AD application deleted successfully" "${YELLOW}"
                 fi
@@ -254,7 +256,7 @@ cleanup() {
         # Show appropriate cleanup completion message
         if [ -n "$role_definition_id" ] || [ -n "$sp_object_id" ] || [ -n "$app_id" ]; then
             if [ "$is_interrupt" = true ]; then
-                log_info "✅ Successfully deleted the created resources. Check log file: $LOG_FILE" "${GREEN}"
+                log_info "✅  Successfully deleted the created resources. Check log file: $LOG_FILE" "${GREEN}"
                 log_info "Check log file: $LOG_FILE" "${NC}"
             else
                 log_info "Successfully deleted the created resources. Check log file: $LOG_FILE" "${YELLOW}"
@@ -262,7 +264,7 @@ cleanup() {
             fi
         else
             if [ "$is_interrupt" = true ]; then
-                log_info "✅ Cleanup completed (no Azure resources were created). Check log file: $LOG_FILE" "${GREEN}"
+                log_info "✅  Cleanup completed (no Azure resources were created). Check log file: $LOG_FILE" "${GREEN}"
                 log_info "Check log file: $LOG_FILE" "${NC}"
             else
                 log_info "Cleanup completed (no Azure resources were created). Check log file: $LOG_FILE" "${YELLOW}"
@@ -303,7 +305,7 @@ check_azure_auth() {
     # Set the subscription as current
     az account set --subscription "$SUBSCRIPTION_ID" &>/dev/null
     current_sub=$(az account show --query name -o tsv 2>/dev/null)
-    log_info "✅ Authenticated to Azure subscription: $current_sub" "${GREEN}"
+    log_info "✅  Authenticated to Azure subscription: $current_sub" "${GREEN}"
     log_info ""
 }
 
@@ -371,7 +373,7 @@ validate_inputs() {
     
     # Position 7: Created by (no validation needed - has default)
     
-    log_info "✅ All input parameters validated" "${GREEN}"
+    log_info "✅  All input parameters validated" "${GREEN}"
     log_info ""
 }
 
@@ -390,12 +392,12 @@ send_backend_status() {
     
     # Skip if Salt host or token not provided
     if [ -z "$SALT_HOST" ] || [ -z "$BEARER_TOKEN" ]; then
-        log_warning "⚠️ Skipping backend status update - Salt Host or Bearer Token not provided"
+        log_warning "Skipping backend status update - Salt Host or Bearer Token not provided"
         return 0
     fi
     
     log_info "Sending deployment status to Salt Security backend: $deployment_status" "${CYAN}${BOLD}"
-    
+
     backend_payload=$(cat <<EOF
 {
   "accountId": "$SUBSCRIPTION_ID",
@@ -429,20 +431,20 @@ EOF
         response_body=$(echo "$response" | sed '$d')
 
         if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
-            log_info "✅ Successfully sent status '$deployment_status' to backend (HTTP $http_code)" "${GREEN}"
+            log_info "✅  Successfully sent status '$deployment_status' to backend (HTTP $http_code)" "${GREEN}"
             if [ -n "$response_body" ]; then
                 log_info "Backend response: $response_body"
                 log_info ""
             fi
             return 0
         else
-            log_warning "⚠️ Backend webhook returned HTTP $http_code"
+            log_warning "Backend webhook returned HTTP $http_code"
             log_warning "Response: $response_body"
             log_info ""
             return 1
         fi
     else
-        log_warning "⚠️ Failed to send status to backend webhook"
+        log_warning "Failed to send status to backend webhook"
         log_info ""
         return 1
     fi
@@ -497,11 +499,13 @@ show_help() {
     echo "Optional parameters:"
     echo "  --app-name=<name>          Application name (default: SaltAppServicePrincipal)"
     echo "  --role-name=<name>         Custom role name (default: SaltCustomAppRole)"
-    echo "  --created-by=<name>        Created by identifier (default: Salt Security)"
+    echo "  --created-by=\"<name>\"      The name of the person who executed this deployment script (use quotes for names that contain spaces, default: Salt Security)"
     echo "  --auto-approve             Skip confirmation prompts"
     echo "  --help                     Show this help message"
     echo ""
-    echo "Note: APP_NAME and ROLE_NAME can be provided interactively if not specified as flags"
+    echo "Notes:"
+    echo "  • APP_NAME and ROLE_NAME can be provided interactively if not specified as flags"
+    echo "  • Values containing spaces must be quoted (e.g., --created-by=\"John Doe\")"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -547,7 +551,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
-            echo "Error: Unknown option: $1" >&2
+            log_error "Unknown option: $1"
             show_help
             exit 1
             ;;
@@ -705,10 +709,10 @@ if [ "$error_occurred" = false ]; then
             # Tag the application
             log_info "Tagging application with: $resource_tag" "${CYAN}"
             if az ad app update --id "$app_id" --set tags="[\"$resource_tag\"]" >/dev/null 2>&1; then
-                log_info "✅ Application tagged successfully" "${GREEN}"
+                log_info "✅  Application tagged successfully" "${GREEN}"
                 log_info ""
             else
-                log_warning "⚠️ Failed to tag application (non-critical)"
+                log_warning "Failed to tag application (non-critical)"
                 log_info ""
             fi
         else
@@ -727,7 +731,7 @@ if [ "$error_occurred" = false ]; then
         json_part=$(echo "$secret_result" | sed -n '/^{/,$p')
         if echo "$json_part" | jq . >/dev/null 2>&1; then
             client_secret=$(echo "$json_part" | jq -r '.password')
-            log_info "✅ Client secret created successfully" "${GREEN}"
+            log_info "✅  Client secret created successfully" "${GREEN}"
         else
             handle_error "Failed to parse client secret result: $secret_result"
         fi
@@ -754,15 +758,15 @@ if [ "$error_occurred" = false ]; then
         json_part=$(echo "$sp_result" | sed -n '/^{/,$p')
         if echo "$json_part" | jq . >/dev/null 2>&1; then
             sp_object_id=$(echo "$json_part" | jq -r '.id')
-            log_info "✅ Service principal created successfully - Object ID: $sp_object_id" "${GREEN}"
+            log_info "✅  Service principal created successfully - Object ID: $sp_object_id" "${GREEN}"
             
             # Tag the service principal
             log_info "Tagging service principal with: $resource_tag" "${CYAN}"
             if az ad sp update --id "$sp_object_id" --set tags="[\"$resource_tag\"]" >/dev/null 2>&1; then
-                log_info "✅ Service principal tagged successfully" "${GREEN}"
+                log_info "✅  Service principal tagged successfully" "${GREEN}"
                 log_info ""
             else
-                log_warning "⚠️ Failed to tag service principal (non-critical)"
+                log_warning "Failed to tag service principal (non-critical)"
                 log_info ""
             fi
         else
@@ -822,7 +826,7 @@ EOF
             if echo "$json_part" | jq . >/dev/null 2>&1; then
                 role_definition_id=$(echo "$json_part" | jq -r '.id')
                 role_created_this_run=true
-                log_info "✅ Custom role created - Role ID: $role_definition_id" "${GREEN}"
+                log_info "✅  Custom role created - Role ID: $role_definition_id" "${GREEN}"
                 log_info ""
             else
                 handle_error "Failed to parse role creation result: $role_result"
@@ -844,7 +848,7 @@ if [ "$error_occurred" = false ]; then
           --assignee "$sp_object_id" \
           --role "$role_definition_id" \
           --scope "/subscriptions/$SUBSCRIPTION_ID" >/dev/null 2>&1; then
-            log_info "✅ Role assignment created" "${GREEN}"
+            log_info "✅  Role assignment created" "${GREEN}"
             log_info ""
             break
         else
@@ -921,7 +925,7 @@ fi
 if [ "$error_occurred" = true ]; then
     log_error "Script completed with errors. Check the log file: $LOG_FILE"
 else
-    log_info "✅ Script completed successfully. Log file: $LOG_FILE" "${GREEN}"
+    log_info "✅  Script completed successfully. Log file: $LOG_FILE" "${GREEN}"
 fi
 
 # Exit with error code if deployment failed
