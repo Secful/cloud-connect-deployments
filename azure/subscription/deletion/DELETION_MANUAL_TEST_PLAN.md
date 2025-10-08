@@ -356,6 +356,205 @@ export BEARER_TOKEN="test-valid-token"
 - Successful HTTP response logged
 - "Successfully sent deletion request to backend" message
 
+#### BCK-001a: Salt US Dashboard Deletion Notification ✅
+**Objective**: Test deletion notification integration with Salt Security US production dashboard.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export SALT_HOST="https://api.us.saltsecurity.io"  # Salt US production endpoint
+export BEARER_TOKEN="your-valid-us-bearer-token"    # Obtain from Salt US dashboard
+export NONCE="a1b2c3d4"  # Use nonce from successful deployment
+```
+
+**Steps**:
+1. **Pre-test setup**:
+   - First create test resources using deployment script with US dashboard
+   - Note the nonce from successful deployment
+   - Obtain valid bearer token from Salt US dashboard
+   - Verify connection exists in US dashboard
+
+2. **Execute deletion**:
+   ```bash
+   ./subscription-level-deletion.sh \
+     --subscription-id="$SUBSCRIPTION_ID" \
+     --nonce="$NONCE" \
+     --salt-host="$SALT_HOST" \
+     --bearer-token="$BEARER_TOKEN" \
+     --auto-approve
+   ```
+
+3. **Monitor deletion**:
+   - Watch console output for backend communication
+   - Check Salt US dashboard to see connection removal
+   - Verify Azure resources are deleted successfully
+
+4. **Verify backend integration**:
+   - Confirm DELETE request sent to `https://api.us.saltsecurity.io/v1/cloud-connect/organizations/accounts/azure/{subscription-id}`
+   - Verify connection disappears from Salt US dashboard
+   - Check that deletion status is properly reflected
+
+**Expected Results**:
+- ✅ Successful HTTP DELETE to `https://api.us.saltsecurity.io/v1/cloud-connect/organizations/accounts/azure/{subscription-id}`
+- ✅ "Successfully sent deletion request to backend (HTTP 200/204)" message
+- ✅ All Azure resources deleted successfully
+- ✅ Connection removed from Salt US dashboard
+- ✅ No orphaned connection entries remain in dashboard
+
+**Dashboard Verification**:
+1. Log into Salt US dashboard (`https://us.saltsecurity.io`)
+2. Navigate to Cloud Connections → Azure
+3. Verify connection is no longer listed
+4. Confirm no residual connection data remains
+5. Verify audit logs show successful deletion
+
+#### BCK-001b: Salt EU Dashboard Deletion Notification ✅
+**Objective**: Test deletion notification integration with Salt Security EU production dashboard.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export SALT_HOST="https://api.eu.saltsecurity.io"  # Salt EU production endpoint
+export BEARER_TOKEN="your-valid-eu-bearer-token"    # Obtain from Salt EU dashboard
+export NONCE="e5f6g7h8"  # Use nonce from successful EU deployment
+```
+
+**Steps**:
+1. **Pre-test setup**:
+   - First create test resources using deployment script with EU dashboard
+   - Note the nonce from successful deployment
+   - Obtain valid bearer token from Salt EU dashboard
+   - Verify connection exists in EU dashboard
+   - Confirm compliance with EU data residency requirements
+
+2. **Execute deletion**:
+   ```bash
+   ./subscription-level-deletion.sh \
+     --subscription-id="$SUBSCRIPTION_ID" \
+     --nonce="$NONCE" \
+     --salt-host="$SALT_HOST" \
+     --bearer-token="$BEARER_TOKEN" \
+     --auto-approve
+   ```
+
+3. **Monitor deletion**:
+   - Watch console output for backend communication
+   - Check Salt EU dashboard to see connection removal
+   - Verify Azure resources are deleted successfully
+
+4. **Verify backend integration**:
+   - Confirm DELETE request sent to `https://api.eu.saltsecurity.io/v1/cloud-connect/organizations/accounts/azure/{subscription-id}`
+   - Verify connection disappears from Salt EU dashboard
+   - Check that deletion status is properly reflected
+
+**Expected Results**:
+- ✅ Successful HTTP DELETE to `https://api.eu.saltsecurity.io/v1/cloud-connect/organizations/accounts/azure/{subscription-id}`
+- ✅ "Successfully sent deletion request to backend (HTTP 200/204)" message
+- ✅ All Azure resources deleted successfully
+- ✅ Connection removed from Salt EU dashboard
+- ✅ No orphaned connection entries remain in dashboard
+
+**Dashboard Verification**:
+1. Log into Salt EU dashboard (`https://eu.saltsecurity.io`)
+2. Navigate to Cloud Connections → Azure
+3. Verify connection is no longer listed
+4. Confirm no residual connection data remains
+5. Verify audit logs show successful deletion
+
+**EU Compliance Notes**:
+- Verify data deletion occurs within EU boundaries
+- Confirm GDPR compliance for credential removal
+- Check data retention policies are properly enforced during deletion
+
+#### BCK-001c: Cross-Region Dashboard Deletion Validation ✅
+**Objective**: Verify proper isolation during deletion operations between US and EU dashboards.
+
+**Setup**:
+```bash
+# Test cross-region deletion authentication
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export NONCE="12345678"  # Use any valid nonce format for testing
+```
+
+**Test Case 1 - US Token with EU Deletion Endpoint**:
+```bash
+export SALT_HOST="https://api.eu.saltsecurity.io"  # EU endpoint
+export BEARER_TOKEN="your-valid-us-bearer-token"    # US token
+./subscription-level-deletion.sh \
+  --subscription-id="$SUBSCRIPTION_ID" \
+  --nonce="$NONCE" \
+  --salt-host="$SALT_HOST" \
+  --bearer-token="$BEARER_TOKEN" \
+  --auto-approve
+```
+
+**Test Case 2 - EU Token with US Deletion Endpoint**:
+```bash
+export SALT_HOST="https://api.us.saltsecurity.io"  # US endpoint
+export BEARER_TOKEN="your-valid-eu-bearer-token"    # EU token
+./subscription-level-deletion.sh \
+  --subscription-id="$SUBSCRIPTION_ID" \
+  --nonce="$NONCE" \
+  --salt-host="$SALT_HOST" \
+  --bearer-token="$BEARER_TOKEN" \
+  --auto-approve
+```
+
+**Expected Results**:
+- ✅ **Case 1**: Backend returns HTTP 401/403 authentication error for US token on EU endpoint
+- ✅ **Case 2**: Backend returns HTTP 401/403 authentication error for EU token on US endpoint
+- ✅ Script logs warning: "Backend endpoint returned HTTP 401/403" but continues
+- ✅ Azure resource deletion still completes successfully despite backend auth failures
+- ✅ Clear error messages indicate cross-region authentication failure
+
+**Security Validation**:
+- Confirms proper access control during deletion operations
+- Validates that deletion tokens are region-specific and isolated
+- Ensures no unauthorized cross-region deletion operations
+
+#### BCK-001d: Dashboard Connection State Synchronization ✅
+**Objective**: Test that dashboard properly reflects connection state changes during deletion.
+
+**Prerequisites**:
+1. Successfully deploy resources using deployment script
+2. Verify connection appears in appropriate dashboard (US or EU)
+3. Note deployment details for deletion testing
+
+**Test Scenarios**:
+
+**Scenario A - Successful Deletion with Dashboard Update**:
+1. **Setup**: Connection visible in dashboard, all Azure resources exist
+2. **Action**: Run deletion script with valid parameters
+3. **Expected**: 
+   - Azure resources deleted
+   - Backend notified successfully
+   - Connection removed from dashboard
+   - No orphaned dashboard entries
+
+**Scenario B - Azure Deletion Success, Backend Notification Failure**:
+1. **Setup**: Connection in dashboard, use unreachable backend URL
+2. **Action**: Run deletion with invalid backend endpoint
+3. **Expected**:
+   - Azure resources still deleted successfully
+   - Backend notification fails with warning
+   - Dashboard connection may remain (not updated)
+   - Clear warning about backend communication failure
+
+**Scenario C - Partial Deletion with Dashboard Consistency**:
+1. **Setup**: Connection in dashboard, modify permissions to cause partial deletion failure
+2. **Action**: Run deletion script
+3. **Expected**:
+   - Partial Azure resource deletion
+   - Backend notified of failure status
+   - Dashboard reflects appropriate error state or retains connection
+   - Clear indication of partial failure
+
+**Dashboard State Verification**:
+- Before deletion: Connection visible with proper status
+- During deletion: No intermediate inconsistent states
+- After successful deletion: Connection completely removed
+- After failed deletion: Connection preserved with error indicators (if applicable)
+
 #### BCK-002: Backend URL Unreachable
 **Objective**: Test handling of network failures.
 
@@ -540,6 +739,10 @@ Use this checklist to track test execution:
 
 ### Backend Integration Tests
 - [ ] BCK-001: Successful backend notification
+- [ ] BCK-001a: Salt US Dashboard Deletion Notification
+- [ ] BCK-001b: Salt EU Dashboard Deletion Notification
+- [ ] BCK-001c: Cross-Region Dashboard Deletion Validation
+- [ ] BCK-001d: Dashboard Connection State Synchronization
 - [ ] BCK-002: Backend URL unreachable  
 - [ ] BCK-003: Invalid bearer token
 

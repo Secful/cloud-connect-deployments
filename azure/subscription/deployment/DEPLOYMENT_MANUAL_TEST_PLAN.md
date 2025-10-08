@@ -1071,6 +1071,187 @@ export ATTEMPT_ID="$(uuidgen)"
 - Successful HTTP responses logged
 - "Successfully sent status 'X' to backend" messages
 
+#### BCK-001a: Salt US Dashboard Integration ✅
+**Objective**: Test integration with Salt Security US production dashboard.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export SALT_HOST="https://api.us.saltsecurity.io"  # Salt US production endpoint
+export BEARER_TOKEN="your-valid-us-bearer-token"    # Obtain from Salt US dashboard
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="SaltUSTestApp"
+export ROLE_NAME="SaltUSTestRole"
+```
+
+**Steps**:
+1. **Pre-test setup**:
+   - Obtain valid bearer token from Salt US dashboard
+   - Verify network connectivity to US endpoints
+   - Ensure test Azure subscription is accessible
+
+2. **Execute deployment**:
+   ```bash
+   ./subscription-level-deployment.sh \
+     --subscription-id="$SUBSCRIPTION_ID" \
+     --salt-host="$SALT_HOST" \
+     --bearer-token="$BEARER_TOKEN" \
+     --installation-id="$INSTALLATION_ID" \
+     --attempt-id="$ATTEMPT_ID" \
+     --app-name="$APP_NAME" \
+     --role-name="$ROLE_NAME" \
+     --created-by="Manual Test - US Dashboard" \
+     --auto-approve
+   ```
+
+3. **Monitor deployment**:
+   - Watch console output for backend communication
+   - Check Salt US dashboard for deployment status updates
+   - Verify Azure resources are created successfully
+
+4. **Verify backend integration**:
+   - Confirm "Initiated" status sent to `https://api.us.saltsecurity.io/v1/cloud-connect/scan/azure`
+   - Verify deployment appears in Salt US dashboard
+   - Check that "Succeeded" status is reflected in dashboard
+   - Validate connection credentials are stored securely
+
+**Expected Results**:
+- ✅ Successful HTTP POST to `https://api.us.saltsecurity.io/v1/cloud-connect/scan/azure`
+- ✅ "Successfully sent status 'Initiated' to backend (HTTP 200/201)" message
+- ✅ All Azure resources created successfully with US-specific naming
+- ✅ "Successfully sent status 'Succeeded' to backend (HTTP 200/201)" message  
+- ✅ Deployment visible and properly configured in Salt US dashboard
+- ✅ Connection test successful from Salt dashboard to Azure subscription
+
+**Dashboard Verification**:
+1. Log into Salt US dashboard (`https://us.saltsecurity.io`)
+2. Navigate to Cloud Connections → Azure
+3. Verify new connection appears with correct subscription ID
+4. Test connection functionality from dashboard
+5. Confirm all connection fields populated correctly:
+   - Client ID matches deployment output
+   - Tenant ID matches Azure subscription
+   - Subscription ID matches input parameter
+
+#### BCK-001b: Salt EU Dashboard Integration ✅
+**Objective**: Test integration with Salt Security EU production dashboard.
+
+**Setup**:
+```bash
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export SALT_HOST="https://api.eu.saltsecurity.io"  # Salt EU production endpoint
+export BEARER_TOKEN="your-valid-eu-bearer-token"    # Obtain from Salt EU dashboard
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+export APP_NAME="SaltEUTestApp"
+export ROLE_NAME="SaltEUTestRole"
+```
+
+**Steps**:
+1. **Pre-test setup**:
+   - Obtain valid bearer token from Salt EU dashboard
+   - Verify network connectivity to EU endpoints
+   - Ensure test Azure subscription is accessible
+   - Confirm compliance with EU data residency requirements
+
+2. **Execute deployment**:
+   ```bash
+   ./subscription-level-deployment.sh \
+     --subscription-id="$SUBSCRIPTION_ID" \
+     --salt-host="$SALT_HOST" \
+     --bearer-token="$BEARER_TOKEN" \
+     --installation-id="$INSTALLATION_ID" \
+     --attempt-id="$ATTEMPT_ID" \
+     --app-name="$APP_NAME" \
+     --role-name="$ROLE_NAME" \
+     --created-by="Manual Test - EU Dashboard" \
+     --auto-approve
+   ```
+
+3. **Monitor deployment**:
+   - Watch console output for backend communication
+   - Check Salt EU dashboard for deployment status updates
+   - Verify Azure resources are created successfully
+
+4. **Verify backend integration**:
+   - Confirm "Initiated" status sent to `https://api.eu.saltsecurity.io/v1/cloud-connect/scan/azure`
+   - Verify deployment appears in Salt EU dashboard
+   - Check that "Succeeded" status is reflected in dashboard
+   - Validate connection credentials are stored securely
+
+**Expected Results**:
+- ✅ Successful HTTP POST to `https://api.eu.saltsecurity.io/v1/cloud-connect/scan/azure`
+- ✅ "Successfully sent status 'Initiated' to backend (HTTP 200/201)" message
+- ✅ All Azure resources created successfully with EU-specific naming
+- ✅ "Successfully sent status 'Succeeded' to backend (HTTP 200/201)" message  
+- ✅ Deployment visible and properly configured in Salt EU dashboard
+- ✅ Connection test successful from Salt dashboard to Azure subscription
+
+**Dashboard Verification**:
+1. Log into Salt EU dashboard (`https://eu.saltsecurity.io`)
+2. Navigate to Cloud Connections → Azure  
+3. Verify new connection appears with correct subscription ID
+4. Test connection functionality from dashboard
+5. Confirm all connection fields populated correctly:
+   - Client ID matches deployment output
+   - Tenant ID matches Azure subscription
+   - Subscription ID matches input parameter
+
+**EU Compliance Notes**:
+- Verify data processing occurs within EU boundaries
+- Confirm GDPR compliance for credential storage
+- Check data retention policies are properly applied
+
+#### BCK-001c: Cross-Region Dashboard Validation ✅
+**Objective**: Verify isolation and proper routing between US and EU dashboards.
+
+**Setup**:
+```bash
+# Test that US tokens don't work with EU endpoints and vice versa
+export SUBSCRIPTION_ID="your-valid-test-subscription-id"
+export INSTALLATION_ID="$(uuidgen)"
+export ATTEMPT_ID="$(uuidgen)"
+```
+
+**Test Case 1 - US Token with EU Endpoint**:
+```bash
+export SALT_HOST="https://api.eu.saltsecurity.io"  # EU endpoint
+export BEARER_TOKEN="your-valid-us-bearer-token"    # US token
+./subscription-level-deployment.sh \
+  --subscription-id="$SUBSCRIPTION_ID" \
+  --salt-host="$SALT_HOST" \
+  --bearer-token="$BEARER_TOKEN" \
+  --installation-id="$INSTALLATION_ID" \
+  --attempt-id="$ATTEMPT_ID" \
+  --auto-approve
+```
+
+**Test Case 2 - EU Token with US Endpoint**:
+```bash
+export SALT_HOST="https://api.us.saltsecurity.io"  # US endpoint  
+export BEARER_TOKEN="your-valid-eu-bearer-token"    # EU token
+./subscription-level-deployment.sh \
+  --subscription-id="$SUBSCRIPTION_ID" \
+  --salt-host="$SALT_HOST" \
+  --bearer-token="$BEARER_TOKEN" \
+  --installation-id="$INSTALLATION_ID" \
+  --attempt-id="$ATTEMPT_ID" \
+  --auto-approve
+```
+
+**Expected Results**:
+- ✅ **Case 1**: Backend returns HTTP 401/403 authentication error for US token on EU endpoint
+- ✅ **Case 2**: Backend returns HTTP 401/403 authentication error for EU token on US endpoint  
+- ✅ Script logs warning: "Backend webhook returned HTTP 401/403" but continues
+- ✅ Azure deployment still completes successfully despite backend auth failures
+- ✅ Clear error messages indicate cross-region authentication failure
+
+**Security Validation**:
+- Confirms proper access control between US and EU environments
+- Validates that bearer tokens are region-specific and isolated
+- Ensures no data leakage between geographic boundaries
+
 #### BCK-002: Backend URL Unreachable ✅
 **Objective**: Test handling of network failures.
 
@@ -1435,6 +1616,9 @@ Use this checklist to track test execution:
 
 ### Backend Integration Tests
 - [✅] BCK-001: Successful backend communication
+- [ ] BCK-001a: Salt US Dashboard Integration
+- [ ] BCK-001b: Salt EU Dashboard Integration  
+- [ ] BCK-001c: Cross-Region Dashboard Validation
 - [✅] BCK-002: Backend URL unreachable  
 - [✅] BCK-003: Invalid bearer token
 - [✅] BCK-004: Empty bearer token
