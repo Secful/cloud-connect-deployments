@@ -104,7 +104,7 @@ cleanup() {
         
         # Always ask user for confirmation before proceeding with deletion
         log_info ""
-        log_info "Do you want to delete the Azure resources (app registration, service principal, custom role) created during this deployment? (y/n): " "${YELLOW}${BOLD}"
+        log_info "Do you want to check and clean up any Azure resources that may have been created during this deployment? (y/n): " "${YELLOW}${BOLD}"
         read -r user_confirmation
         
         if [[ ! "$user_confirmation" =~ ^[Yy]$ ]]; then

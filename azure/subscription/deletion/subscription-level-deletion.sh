@@ -166,6 +166,46 @@ handle_error() {
     log_info ""
 }
 
+# Function to handle script interruption
+handle_interrupt() {
+    local exit_code=$?
+    
+    log_info ""
+    log_info "══════════════════════════════════════════════════════════════" "${RED}${BOLD}"
+    log_info "                    SCRIPT INTERRUPTED" "${RED}${BOLD}"
+    log_info "══════════════════════════════════════════════════════════════" "${RED}${BOLD}"
+    log_info ""
+    log_warning "Script was interrupted by user (Ctrl+C or SIGTERM)"
+    log_info ""
+    
+    # Check if we were in the middle of deletion operations
+    if [ "$deletion_in_progress" = true ]; then
+        log_warning "WARNING: Deletion operations were in progress when script was interrupted!"
+        log_warning "Some resources may have been partially deleted. Check Azure portal for current state."
+        log_info ""
+        log_info "To check remaining resources with nonce '$NONCE', run:"
+        log_info "  az ad app list --query \"[?contains(displayName, '-$NONCE')]\"" "${CYAN}"
+        log_info "  az ad sp list --query \"[?contains(displayName, '-$NONCE')]\"" "${CYAN}"
+        log_info "  az role definition list --name \"*-$NONCE\" --custom-role-only" "${CYAN}"
+        log_info ""
+        log_info "You can re-run the deletion script to clean up any remaining resources:" "${CYAN}"
+        if [ -n "$SALT_HOST" ] && [ -n "$BEARER_TOKEN" ]; then
+            log_info "  $0 --subscription-id=\"$SUBSCRIPTION_ID\" --nonce=\"$NONCE\" --salt-host=\"$SALT_HOST\" --bearer-token=\"$BEARER_TOKEN\"" "${CYAN}"
+        else
+            log_info "  $0 --subscription-id=\"$SUBSCRIPTION_ID\" --nonce=\"$NONCE\" --dry-run  # To check remaining resources" "${CYAN}"
+        fi
+    else
+        log_info "Script was interrupted before deletion operations began."
+        log_info "No Azure resources were modified."
+    fi
+    
+    log_info ""
+    log_info "Script interrupted. Check log file: $LOG_FILE" "${YELLOW}"
+    log_info ""
+    
+    exit 130  # Standard exit code for script terminated by Ctrl+C
+}
+
 # Function to send deletion status to backend
 send_backend_deletion() {
     local deletion_status="$1"
@@ -212,6 +252,15 @@ send_backend_deletion() {
     fi
 }
 
+# Global variables for discovered resources (shared between discover_resources and delete_resources functions)
+found_app_id=""
+found_app_name=""
+found_sp_object_id=""
+found_role_id=""
+found_role_name=""
+found_subscription_id=""
+found_role_assignments=""
+
 # Function to discover resources by nonce
 discover_resources() {
     log_info ""
@@ -222,13 +271,14 @@ discover_resources() {
     
     log_info "Discovering resources with nonce: $NONCE" "${CYAN}${BOLD}"
     
-    # Initialize resource tracking variables
+    # Reset resource tracking variables
     found_app_id=""
     found_app_name=""
     found_sp_object_id=""
     found_role_id=""
     found_role_name=""
     found_subscription_id=""
+    found_role_assignments=""
     
     # Get current subscription ID and verify it matches our target
     found_subscription_id=$(az account show --query id -o tsv 2>/dev/null)
@@ -247,9 +297,9 @@ discover_resources() {
     fi
 
 
-    # 1. Search for Azure AD Applications with nonce suffix
+    # 1. Search for Azure AD Applications and Service Principals with nonce suffix
     log_info ""
-    log_info "Searching for Azure AD applications with nonce suffix..." "${CYAN}"
+    log_info "Searching for Azure AD applications and service principals with nonce suffix..." "${CYAN}"
     
     if apps_json=$(az ad app list --query "[?contains(displayName, '-$NONCE')]" 2>/dev/null); then
         if [ "$apps_json" != "[]" ] && [ -n "$apps_json" ]; then
@@ -287,6 +337,7 @@ discover_resources() {
             fi
         else
             log_warning "No Azure AD applications found with nonce suffix '-$NONCE'"
+            log_info "Service principal search skipped (no associated Azure AD application found)" "${YELLOW}"
         fi
     else
         log_error "Failed to search for Azure AD applications"
@@ -316,7 +367,96 @@ discover_resources() {
         return 1
     fi
     
-    # 4. Summary of discovered resources - show what will be deleted
+    # 4. Search for Role Assignments
+    log_info ""
+    if [ -n "$found_sp_object_id" ] && [ -n "$found_role_id" ]; then
+        # Both service principal and custom role found - search for specific assignments
+        log_info "Searching for role assignments between service principal and custom role..." "${CYAN}"
+        
+        if assignments=$(az role assignment list \
+            --assignee "$found_sp_object_id" \
+            --role "$found_role_id" \
+            --scope "/subscriptions/$found_subscription_id" \
+            --query "[].{id:id,roleDefinitionId:roleDefinitionId}" -o json 2>/dev/null); then
+            
+            if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
+                assignment_count=$(echo "$assignments" | jq length)
+                log_info "✅  Found $assignment_count role assignment(s):" "${GREEN}"
+                
+                # Display each role assignment with its details
+                echo "$assignments" | jq -r '.[] | "Role Assignment ID: " + .id' | while read -r assignment_detail; do
+                    log_info "  • $assignment_detail" "${GREEN}"
+                done
+                
+                found_role_assignments="$assignments"
+            else
+                log_info "No role assignments found between service principal and custom role" "${YELLOW}"
+                found_role_assignments=""
+            fi
+        else
+            log_warning "Could not check for role assignments between service principal and custom role"
+            found_role_assignments=""
+        fi
+    elif [ -n "$found_role_id" ]; then
+        # Only custom role found - search for any assignments using this role
+        log_info "Searching for any role assignments using custom role (service principal not found)..." "${CYAN}"
+        
+        if assignments=$(az role assignment list \
+            --role "$found_role_id" \
+            --scope "/subscriptions/$found_subscription_id" \
+            --query "[].{id:id,principalId:principalId,roleDefinitionId:roleDefinitionId}" -o json 2>/dev/null); then
+            
+            if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
+                assignment_count=$(echo "$assignments" | jq length)
+                log_info "✅  Found $assignment_count role assignment(s) using custom role:" "${GREEN}"
+                
+                # Display each role assignment with its details
+                echo "$assignments" | jq -r '.[] | "Role Assignment ID: " + .id + " (Principal: " + .principalId + ")"' | while read -r assignment_detail; do
+                    log_info "  • $assignment_detail" "${GREEN}"
+                done
+                
+                found_role_assignments="$assignments"
+            else
+                log_info "No role assignments found using custom role with nonce '$NONCE'" "${YELLOW}"
+                found_role_assignments=""
+            fi
+        else
+            log_warning "Could not check for role assignments using custom role"
+            found_role_assignments=""
+        fi
+    elif [ -n "$found_sp_object_id" ]; then
+        # Only service principal found - search for any assignments to this principal
+        log_info "Searching for any role assignments to service principal (custom role not found)..." "${CYAN}"
+        
+        if assignments=$(az role assignment list \
+            --assignee "$found_sp_object_id" \
+            --scope "/subscriptions/$found_subscription_id" \
+            --query "[].{id:id,roleDefinitionId:roleDefinitionId,roleDefinitionName:roleDefinitionName}" -o json 2>/dev/null); then
+            
+            if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
+                assignment_count=$(echo "$assignments" | jq length)
+                log_info "✅  Found $assignment_count role assignment(s) to service principal:" "${GREEN}"
+                
+                # Display each role assignment with its details
+                echo "$assignments" | jq -r '.[] | "Role Assignment ID: " + .id + " (Role: " + (.roleDefinitionName // .roleDefinitionId) + ")"' | while read -r assignment_detail; do
+                    log_info "  • $assignment_detail" "${GREEN}"
+                done
+                
+                found_role_assignments="$assignments"
+            else
+                log_info "No role assignments found to service principal" "${YELLOW}"
+                found_role_assignments=""
+            fi
+        else
+            log_warning "Could not check for role assignments to service principal"
+            found_role_assignments=""
+        fi
+    else
+        log_info "Skipping role assignment search (no service principal or custom role found)" "${CYAN}"
+        found_role_assignments=""
+    fi
+    
+    # 5. Summary of discovered resources - show what will be deleted
     log_info ""
     log_info "Resources to be deleted:" "${CYAN}${BOLD}"
     
@@ -337,17 +477,34 @@ discover_resources() {
         resources_to_delete=$((resources_to_delete + 1))
     fi
     
+    if [ -n "$found_role_assignments" ]; then
+        assignment_count=$(echo "$found_role_assignments" | jq length)
+        log_info "Role Assignments: $assignment_count assignment(s)" "${YELLOW}"
+        
+        # Display each role assignment that will be deleted
+        echo "$found_role_assignments" | jq -r '.[] | "  • Role Assignment ID: " + .id' | while read -r assignment_detail; do
+            log_info "$assignment_detail" "${YELLOW}"
+        done
+        
+        resources_to_delete=$((resources_to_delete + assignment_count))
+    fi
+
+    log_info ""
     # Show what was not found (won't be deleted)
     if [ -z "$found_app_id" ]; then
-        log_info "Azure AD Application: Not found (nothing to delete)" "${YELLOW}"
+        log_info "Azure AD Application: Not found (nothing to delete)" "${NC}"
     fi
     
     if [ -z "$found_sp_object_id" ]; then
-        log_info "Service Principal: Not found (nothing to delete)" "${YELLOW}"
+        log_info "Service Principal: Not found (nothing to delete)" "${NC}"
     fi
     
     if [ -z "$found_role_id" ]; then
-        log_info "Custom Role: Not found (nothing to delete)" "${YELLOW}"
+        log_info "Custom Role: Not found (nothing to delete)" "${NC}"
+    fi
+    
+    if [ -z "$found_role_assignments" ]; then
+        log_info "Role Assignments: Not found (nothing to delete)" "${NC}"
     fi
     
     # Show total count
@@ -381,84 +538,86 @@ delete_resources() {
     
     # Step 1: Delete role assignments (if any exist)
     # Note: Role assignments are automatically deleted when the role definition is deleted,
-    # but we'll check for any explicit assignments to be thorough
-    if [ -n "$found_sp_object_id" ] && [ -n "$found_role_id" ]; then
-        log_info "Checking for role assignments to delete..." "${CYAN}"
+    # but we'll delete any explicit assignments found during discovery to be thorough
+    if [ -n "$found_role_assignments" ]; then
+        log_info "Deleting role assignments found during discovery..." "${CYAN}"
         
-        # Get role assignments for the service principal with the custom role
-        if assignments=$(az role assignment list \
-            --assignee "$found_sp_object_id" \
-            --role "$found_role_id" \
-            --scope "/subscriptions/$found_subscription_id" \
-            --query "[].{id:id}" -o json 2>/dev/null); then
-            
-            if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
-                assignment_count=$(echo "$assignments" | jq length)
-                log_info "Found $assignment_count role assignment(s) to delete" "${YELLOW}"
-                
-                # Delete each role assignment
-                echo "$assignments" | jq -r '.[].id' | while read -r assignment_id; do
-                    if [ -n "$assignment_id" ]; then
-                        log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
-                        if az role assignment delete --ids "$assignment_id" >/dev/null 2>&1; then
-                            log_info "✅  Role assignment deleted successfully" "${GREEN}"
-                        else
-                            log_warning "Failed to delete role assignment: $assignment_id"
-                            deletion_errors=true
-                        fi
-                    fi
-                done
-            else
-                log_info "No explicit role assignments found (this is normal)" "${GREEN}"
+        assignment_count=$(echo "$found_role_assignments" | jq length)
+        log_info "Found $assignment_count role assignment(s) to delete" "${YELLOW}"
+        
+        # Delete each role assignment
+        echo "$found_role_assignments" | jq -r '.[].id' | while read -r assignment_id; do
+            if [ -n "$assignment_id" ]; then
+                log_info "Deleting role assignment: $assignment_id" "${YELLOW}"
+                if error_output=$(az role assignment delete --ids "$assignment_id" 2>&1); then
+                    log_info "✅  Role assignment deleted successfully" "${GREEN}"
+                else
+                    log_warning "Failed to delete role assignment: $assignment_id"
+                    log_warning "Azure error: $error_output"
+                    deletion_errors=true
+                fi
             fi
-        else
-            log_warning "Could not check for role assignments"
-        fi
+        done
+        log_info ""
+    else
+        log_info "No role assignments found during discovery - skipping deletion step" "${YELLOW}"
         log_info ""
     fi
     
     # Step 2: Delete custom role definition
     if [ -n "$found_role_id" ]; then
-        log_info "Deleting custom role definition..." "${CYAN}"
+        log_info "Deleting custom role definition found during discovery..." "${CYAN}"
         log_info "Role: $found_role_name" "${YELLOW}"
         log_info "ID: $found_role_id" "${YELLOW}"
         
-        if az role definition delete --name "$found_role_name" --scope "/subscriptions/$found_subscription_id" >/dev/null 2>&1; then
+        if error_output=$(az role definition delete --name "$found_role_name" --scope "/subscriptions/$found_subscription_id" 2>&1); then
             log_info "✅  Custom role definition deleted successfully" "${GREEN}"
         else
             log_error "Failed to delete custom role definition"
+            log_error "Azure error: $error_output"
             deletion_errors=true
         fi
+        log_info ""
+    else
+        log_info "No custom role found during discovery - skipping deletion step" "${YELLOW}"
         log_info ""
     fi
     
     # Step 3: Delete service principal
     if [ -n "$found_sp_object_id" ]; then
-        log_info "Deleting service principal..." "${CYAN}"
+        log_info "Deleting service principal found during discovery..." "${CYAN}"
         log_info "Object ID: $found_sp_object_id" "${YELLOW}"
         
-        if az ad sp delete --id "$found_sp_object_id" >/dev/null 2>&1; then
+        if error_output=$(az ad sp delete --id "$found_sp_object_id" 2>&1); then
             log_info "✅  Service principal deleted successfully" "${GREEN}"
         else
             log_error "Failed to delete service principal"
+            log_error "Azure error: $error_output"
             deletion_errors=true
         fi
+        log_info ""
+    else
+        log_info "No service principal found during discovery - skipping deletion step" "${YELLOW}"
         log_info ""
     fi
     
     # Step 4: Delete Azure AD application (this also deletes client secrets)
     if [ -n "$found_app_id" ]; then
-        log_info "Deleting Azure AD application..." "${CYAN}"
+        log_info "Deleting Azure AD application found during discovery..." "${CYAN}"
         log_info "Application: $found_app_name" "${YELLOW}"
         log_info "ID: $found_app_id" "${YELLOW}"
         
-        if az ad app delete --id "$found_app_id" >/dev/null 2>&1; then
+        if error_output=$(az ad app delete --id "$found_app_id" 2>&1); then
             log_info "✅  Azure AD application deleted successfully" "${GREEN}"
             log_info "(Client secrets were automatically deleted with the application)" "${GREEN}"
         else
             log_error "Failed to delete Azure AD application"
+            log_error "Azure error: $error_output"
             deletion_errors=true
         fi
+        log_info ""
+    else
+        log_info "No Azure AD application found during discovery - skipping deletion step" "${YELLOW}"
         log_info ""
     fi
     
@@ -486,6 +645,8 @@ show_help() {
     echo "Required parameters:"
     echo "  --subscription-id=<id>     Azure subscription ID"
     echo "  --nonce=<nonce>            8-character hexadecimal nonce from deployment"
+    echo ""
+    echo "Required for actual deletion (not needed for --dry-run):"
     echo "  --salt-host=<url>          Salt Host URL for status updates"
     echo "  --bearer-token=<token>     Authentication bearer token"
     echo ""
@@ -493,6 +654,13 @@ show_help() {
     echo "  --auto-approve             Skip confirmation prompts"
     echo "  --dry-run                  Identify resources without deleting them"
     echo "  --help                     Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  Dry-run mode (no backend parameters needed):"
+    echo "    $0 --subscription-id=<id> --nonce=<nonce> --dry-run"
+    echo ""
+    echo "  Full deletion:"
+    echo "    $0 --subscription-id=<id> --nonce=<nonce> --salt-host=<url> --bearer-token=<token>"
     echo ""
 }
 
@@ -542,11 +710,14 @@ fi
 if [ -z "$NONCE" ]; then
     missing_params+=("--nonce")
 fi
-if [ -z "$SALT_HOST" ]; then
-    missing_params+=("--salt-host")
-fi
-if [ -z "$BEARER_TOKEN" ]; then
-    missing_params+=("--bearer-token")
+# Salt host and bearer token are only required for actual deletion (not dry-run)
+if [ "$DRY_RUN" != true ]; then
+    if [ -z "$SALT_HOST" ]; then
+        missing_params+=("--salt-host")
+    fi
+    if [ -z "$BEARER_TOKEN" ]; then
+        missing_params+=("--bearer-token")
+    fi
 fi
 
 if [ ${#missing_params[@]} -gt 0 ]; then
@@ -563,6 +734,12 @@ echo "Timestamp: $(date)" >> "$LOG_FILE"
 echo "Nonce: $NONCE" >> "$LOG_FILE"
 echo "========================================" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
+
+# Initialize interruption tracking
+deletion_in_progress=false
+
+# Set up signal handling for graceful interruption
+trap handle_interrupt INT TERM
 
 # Now that logging is set up, check dependencies and log everything
 log_info ""
@@ -658,6 +835,7 @@ else
 fi
 
 # Delete discovered resources
+deletion_in_progress=true
 deletion_success=true
 if ! delete_resources; then
     deletion_success=false
@@ -697,8 +875,6 @@ else
     log_error "Script completed with errors. Check log file: $LOG_FILE"
 fi
 
-log_info ""
-log_info "Log file: $LOG_FILE" "${CYAN}"
 log_info ""
 
 # Exit with error code if deletion failed

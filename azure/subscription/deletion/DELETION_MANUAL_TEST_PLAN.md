@@ -180,7 +180,7 @@ export BEARER_TOKEN="test-token-123"              # Required
 
 ### 4. Resource Discovery Tests
 
-#### RDS-001: Successful Resource Discovery (Happy Path)
+#### RDS-001: Successful Resource Discovery (Happy Path) ✅
 **Objective**: Test discovery of existing resources by nonce.
 
 **Setup**:
@@ -191,7 +191,7 @@ First create resources using deployment script:
 ```
 
 **Steps**:
-1. Run deletion script with correct nonce: `./subscription-level-deletion.sh $SUBSCRIPTION_ID $NONCE --dry-run`
+1. Run deletion script with correct nonce: `./subscription-level-deletion.sh --subscription-id=$SUBSCRIPTION_ID --nonce=$NONCE --dry-run`
 2. Monitor discovery output
 
 **Expected Results**:
@@ -199,11 +199,12 @@ First create resources using deployment script:
   - ✅ Azure AD Application with nonce suffix
   - ✅ Service Principal with matching App ID
   - ✅ Custom Role with nonce suffix
+  - ✅ Role Assignments (if they exist between the service principal and custom role)
 - Resources have expected tags "CreatedBySalt-{nonce}"
-- Discovery summary shows all resources found
+- Discovery summary shows all resources found with correct count
 - Dry-run mode exits without deletion
 
-#### RDS-002: No Resources Found
+#### RDS-002: No Resources Found ✅
 **Objective**: Test behavior when no resources match the nonce.
 
 **Steps**:
@@ -268,9 +269,11 @@ export TEST_NONCE="from-deployment-output"
 az ad app list --display-name "*-${TEST_NONCE}"
 az ad sp list --display-name "*-${TEST_NONCE}"
 az role definition list --name "*-${TEST_NONCE}" --custom-role-only
+# Verify no orphaned role assignments remain
+az role assignment list --query "[?contains(roleDefinitionName, '${TEST_NONCE}')]"
 ```
 
-#### DEL-002: Deletion Order Verification
+#### DEL-002: Deletion Order Verification ✅
 **Objective**: Verify resources are deleted in proper dependency order.
 
 **Steps**:
@@ -310,16 +313,50 @@ az role definition list --name "*-${TEST_NONCE}" --custom-role-only
 #### ERR-001: SIGINT Handling (Ctrl+C)
 **Objective**: Test behavior when interrupted during deletion.
 
-**Steps**:
-1. Start deletion with valid parameters
-2. Press Ctrl+C during resource discovery or deletion
-3. Verify interrupt handling
+**Test Case A - Interruption During Resource Discovery**:
+1. Create resources with deployment script
+2. Start deletion script: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --salt-host="$SALT_HOST" --bearer-token="$BEARER_TOKEN" --auto-approve`
+3. Press Ctrl+C during resource discovery phase (before actual deletion begins)
+4. Verify interrupt handling
 
 **Expected Results**:
-- Script catches SIGINT signal
-- Graceful shutdown without corrupting resources
-- Clear message about interruption
-- No partial state corruption
+- Script catches SIGINT signal (exit code 130)
+- Clear "SCRIPT INTERRUPTED" header in red
+- Message: "Script was interrupted before deletion operations began"
+- Message: "No Azure resources were modified"
+- Log file path provided for review
+- No actual Azure resources deleted
+
+**Test Case B - Interruption During Resource Deletion**:
+1. Create resources with deployment script
+2. Start deletion script with valid parameters
+3. Wait for deletion to start (after resource discovery completes)
+4. Press Ctrl+C during actual resource deletion phase
+5. Verify interrupt handling and recovery guidance
+
+**Expected Results**:
+- Script catches SIGINT signal (exit code 130)
+- Clear "SCRIPT INTERRUPTED" header in red
+- Warning: "Deletion operations were in progress when script was interrupted!"
+- Warning: "Some resources may have been partially deleted"
+- Helpful commands to check remaining resources:
+  - `az ad app list --query "[?contains(displayName, '-$NONCE')]"`
+  - `az ad sp list --query "[?contains(displayName, '-$NONCE')]"`
+  - `az role definition list --name "*-$NONCE" --custom-role-only`
+- Recovery command provided to re-run deletion script
+- Log file path provided for review
+
+**Test Case C - Interruption During Dry-Run Mode**:
+1. Create resources with deployment script  
+2. Start dry-run: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --dry-run`
+3. Press Ctrl+C during resource discovery
+4. Verify interrupt handling
+
+**Expected Results**:
+- Script catches SIGINT signal (exit code 130)
+- "Script was interrupted before deletion operations began" message
+- "No Azure resources were modified" message
+- Graceful exit with no corruption
 
 #### ERR-002: Azure API Failures
 **Objective**: Test handling of Azure service failures.
@@ -724,13 +761,13 @@ Use this checklist to track test execution:
 - [ ] AUTH-002: Invalid subscription ID
 
 ### Resource Discovery Tests
-- [ ] RDS-001: Successful resource discovery
-- [ ] RDS-002: No resources found
-- [ ] RDS-003: Partial resources found
+- [✅] RDS-001: Successful resource discovery
+- [✅] RDS-002: No resources found
+- [✅] RDS-003: Partial resources found
 
 ### Resource Deletion Tests
-- [ ] DEL-001: Successful full deletion
-- [ ] DEL-002: Deletion order verification
+- [✅] DEL-001: Successful full deletion
+- [✅] DEL-002: Deletion order verification
 - [ ] DEL-003: Partial deletion failure
 
 ### Error Handling Tests
