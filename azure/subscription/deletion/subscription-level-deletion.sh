@@ -301,7 +301,7 @@ discover_resources() {
     log_info ""
     log_info "Searching for Azure AD applications and service principals with nonce suffix..." "${CYAN}"
     
-    if apps_json=$(az ad app list --query "[?contains(displayName, '-$NONCE')]" 2>/dev/null); then
+    if apps_json=$(az ad app list --query "[?contains(displayName, '-$NONCE')]" 2>&1); then
         if [ "$apps_json" != "[]" ] && [ -n "$apps_json" ]; then
             # Get the first matching app (there should only be one)
             found_app_id=$(echo "$apps_json" | jq -r '.[0].appId // empty')
@@ -312,7 +312,7 @@ discover_resources() {
                 
                 # Verify it has the correct tag (if possible - tags might not be searchable)
                 expected_tag="CreatedBySalt-${NONCE}"
-                if app_details=$(az ad app show --id "$found_app_id" --query "tags" -o json 2>/dev/null); then
+                if app_details=$(az ad app show --id "$found_app_id" --query "tags" -o json 2>&1); then
                     if echo "$app_details" | jq -e --arg tag "$expected_tag" 'index($tag)' >/dev/null 2>&1; then
                         log_info "Confirmed: Application has expected tag '$expected_tag'" "${GREEN}"
                     else
@@ -324,13 +324,14 @@ discover_resources() {
                 # 2. Find associated Service Principal
                 log_info ""
                 log_info "Searching for associated service principal..." "${CYAN}"
-                if sp_json=$(az ad sp show --id "$found_app_id" --query "{id: id, appId: appId}" 2>/dev/null); then
+                if sp_json=$(az ad sp show --id "$found_app_id" --query "{id: id, appId: appId}" 2>&1); then
                     found_sp_object_id=$(echo "$sp_json" | jq -r '.id // empty')
                     if [ -n "$found_sp_object_id" ] && [ "$found_sp_object_id" != "null" ]; then
                         log_info "✅  Found Service Principal: Object ID $found_sp_object_id" "${GREEN}"
                     fi
                 else
                     log_warning "No service principal found for application $found_app_id"
+                    log_warning "Azure error: $sp_json"
                 fi
             else
                 log_warning "Application found but could not extract App ID"
@@ -341,6 +342,7 @@ discover_resources() {
         fi
     else
         log_error "Failed to search for Azure AD applications"
+        log_error "Azure error: $apps_json"
         return 1
     fi
     
@@ -348,7 +350,7 @@ discover_resources() {
     log_info ""
     log_info "Searching for custom roles with nonce suffix..." "${CYAN}"
     
-    if roles_json=$(az role definition list --scope "/subscriptions/$found_subscription_id" --query "[?contains(roleName, '-$NONCE')]" 2>/dev/null); then
+    if roles_json=$(az role definition list --scope "/subscriptions/$found_subscription_id" --query "[?contains(roleName, '-$NONCE')]" 2>&1); then
         if [ "$roles_json" != "[]" ] && [ -n "$roles_json" ]; then
             # Get the first matching role (there should only be one)
             found_role_id=$(echo "$roles_json" | jq -r '.[0].id // empty')
@@ -364,6 +366,7 @@ discover_resources() {
         fi
     else
         log_error "Failed to search for custom roles"
+        log_error "Azure error: $roles_json"
         return 1
     fi
     
@@ -377,7 +380,7 @@ discover_resources() {
             --assignee "$found_sp_object_id" \
             --role "$found_role_id" \
             --scope "/subscriptions/$found_subscription_id" \
-            --query "[].{id:id,roleDefinitionId:roleDefinitionId}" -o json 2>/dev/null); then
+            --query "[].{id:id,roleDefinitionId:roleDefinitionId}" -o json 2>&1); then
             
             if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
                 assignment_count=$(echo "$assignments" | jq length)
@@ -395,6 +398,7 @@ discover_resources() {
             fi
         else
             log_warning "Could not check for role assignments between service principal and custom role"
+            log_warning "Azure error: $assignments"
             found_role_assignments=""
         fi
     elif [ -n "$found_role_id" ]; then
@@ -404,7 +408,7 @@ discover_resources() {
         if assignments=$(az role assignment list \
             --role "$found_role_id" \
             --scope "/subscriptions/$found_subscription_id" \
-            --query "[].{id:id,principalId:principalId,roleDefinitionId:roleDefinitionId}" -o json 2>/dev/null); then
+            --query "[].{id:id,principalId:principalId,roleDefinitionId:roleDefinitionId}" -o json 2>&1); then
             
             if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
                 assignment_count=$(echo "$assignments" | jq length)
@@ -422,6 +426,7 @@ discover_resources() {
             fi
         else
             log_warning "Could not check for role assignments using custom role"
+            log_warning "Azure error: $assignments"
             found_role_assignments=""
         fi
     elif [ -n "$found_sp_object_id" ]; then
@@ -431,7 +436,7 @@ discover_resources() {
         if assignments=$(az role assignment list \
             --assignee "$found_sp_object_id" \
             --scope "/subscriptions/$found_subscription_id" \
-            --query "[].{id:id,roleDefinitionId:roleDefinitionId,roleDefinitionName:roleDefinitionName}" -o json 2>/dev/null); then
+            --query "[].{id:id,roleDefinitionId:roleDefinitionId,roleDefinitionName:roleDefinitionName}" -o json 2>&1); then
             
             if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
                 assignment_count=$(echo "$assignments" | jq length)
@@ -449,6 +454,7 @@ discover_resources() {
             fi
         else
             log_warning "Could not check for role assignments to service principal"
+            log_warning "Azure error: $assignments"
             found_role_assignments=""
         fi
     else

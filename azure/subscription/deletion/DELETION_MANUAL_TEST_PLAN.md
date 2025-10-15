@@ -308,9 +308,54 @@ az role assignment list --query "[?contains(roleDefinitionName, '${TEST_NONCE}')
 - Backend notification indicates failure
 - Script exits with code 1
 
+#### DEL-004: Resources Deleted Between Discovery and Execution ✅
+**Objective**: Test behavior when resources are manually deleted during script execution (between discovery and deletion phases).
+
+**Setup**:
+1. Create test resources using deployment script
+2. Note the nonce from successful deployment
+
+**Steps**:
+1. Run deletion script without `--auto-approve` flag: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --salt-host="$SALT_HOST" --bearer-token="$BEARER_TOKEN"`
+2. Observe discovery phase finds all expected resources (e.g., 4 resources: app, service principal, custom role, role assignment)
+3. When prompted "Do you want to proceed with deleting the discovered resources? (y/n):", do NOT answer yet
+4. In a separate terminal/Azure portal, manually delete one or more discovered resources (e.g., delete the Azure AD application)
+5. Return to the deletion script and answer "y" to proceed with deletion
+6. Observe error handling when script attempts to delete already-deleted resources
+
+**Expected Results**:
+- ✅ Discovery phase successfully identifies all resources
+- ✅ Script proceeds with deletion after user confirmation
+- ✅ Successfully deletes resources that still exist (role assignments, custom role)
+- ✅ Fails gracefully when attempting to delete missing resources with clear error messages:
+  - "Failed to delete service principal"
+  - "Azure error: ERROR: Resource 'xxx' does not exist or one of its queried reference-property objects are not present."
+  - "Failed to delete Azure AD application"
+  - "Azure error: ERROR: Resource 'xxx' does not exist or one of its queried reference-property objects are not present."
+- ✅ Final status indicates "completed with errors"
+- ✅ Backend receives failure notification with proper status
+- ✅ Script exits with error code 1
+- ✅ Log file contains detailed error information for troubleshooting
+
+**Verification**:
+```bash
+# Check remaining resources after script completion
+az ad app list --query "[?contains(displayName, '-${NONCE}')]"
+az ad sp list --query "[?contains(displayName, '-${NONCE}')]" 
+az role definition list --name "*-${NONCE}" --custom-role-only
+az role assignment list --query "[?contains(roleDefinitionName, '${NONCE}')]"
+# All should return empty results since existing resources were deleted and missing ones were already gone
+```
+
+**Notes**:
+- This test validates the script's resilience to race conditions and external interference
+- Demonstrates proper error handling for "resource not found" scenarios
+- Shows that script continues processing other resources despite individual failures
+- Validates backend notification behavior during partial failures
+
 ### 6. Error Handling & Cleanup Tests
 
-#### ERR-001: SIGINT Handling (Ctrl+C)
+#### ERR-001: SIGINT Handling (Ctrl+C) ✅
 **Objective**: Test behavior when interrupted during deletion.
 
 **Test Case A - Interruption During Resource Discovery**:
@@ -358,7 +403,62 @@ az role assignment list --query "[?contains(roleDefinitionName, '${TEST_NONCE}')
 - "No Azure resources were modified" message
 - Graceful exit with no corruption
 
-#### ERR-002: Azure API Failures
+#### ERR-002: SIGTERM Handling (kill -TERM) ✅
+**Objective**: Test behavior when interrupted via SIGTERM signal from another session.
+
+**Test Case A - SIGTERM During Resource Discovery**:
+1. Create resources with deployment script
+2. Start deletion script: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --salt-host="$SALT_HOST" --bearer-token="$BEARER_TOKEN" --auto-approve`
+3. In a **second Azure Cloud Shell session**, find the process: `ps aux | grep subscription-level-deletion`
+4. Send SIGTERM during resource discovery phase: `kill -TERM <pid>`
+5. Verify interrupt handling in the original session
+
+**Expected Results**:
+- Script catches SIGTERM signal (exit code 130)
+- Clear "SCRIPT INTERRUPTED" header in red
+- Message: "Script was interrupted before deletion operations began"
+- Message: "No Azure resources were modified"
+- Log file path provided for review
+- No actual Azure resources deleted
+
+**Test Case B - SIGTERM During Resource Deletion**:
+1. Create resources with deployment script
+2. Start deletion script with valid parameters
+3. In a **second Azure Cloud Shell session**, find the process: `ps aux | grep subscription-level-deletion`
+4. Wait for deletion to start (after resource discovery completes)
+5. Send SIGTERM during actual resource deletion phase: `kill -TERM <pid>`
+6. Verify interrupt handling and recovery guidance
+
+**Expected Results**:
+- Script catches SIGTERM signal (exit code 130)
+- Clear "SCRIPT INTERRUPTED" header in red
+- Warning: "Deletion operations were in progress when script was interrupted!"
+- Warning: "Some resources may have been partially deleted"
+- Helpful commands to check remaining resources:
+  - `az ad app list --query "[?contains(displayName, '-$NONCE')]"`
+  - `az ad sp list --query "[?contains(displayName, '-$NONCE')]"`
+  - `az role definition list --name "*-$NONCE" --custom-role-only`
+- Recovery command provided to re-run deletion script
+- Log file path provided for review
+
+**Test Case C - SIGTERM During Dry-Run Mode**:
+1. Create resources with deployment script  
+2. Start dry-run: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --dry-run`
+3. In a **second Azure Cloud Shell session**, send SIGTERM: `kill -TERM <pid>`
+4. Verify interrupt handling
+
+**Expected Results**:
+- Script catches SIGTERM signal (exit code 130)
+- "Script was interrupted before deletion operations began" message
+- "No Azure resources were modified" message
+- Graceful exit with no corruption
+
+**Notes**:
+- This validates the same interrupt handler works for both SIGINT (Ctrl+C) and SIGTERM (kill -TERM)
+- Azure Cloud Shell allows multiple sessions for this testing scenario
+- Both signals should produce identical behavior since the script traps both: `trap handle_interrupt INT TERM`
+
+#### ERR-003: Azure API Failures
 **Objective**: Test handling of Azure service failures.
 
 **Steps**:
@@ -372,9 +472,53 @@ az role assignment list --query "[?contains(roleDefinitionName, '${TEST_NONCE}')
 - Graceful failure handling
 - Proper error reporting
 
+#### ERR-004: Enhanced Azure CLI Error Reporting ✅
+**Objective**: Test that Azure CLI error messages are properly captured and displayed during discovery phase.
+
+**Test Case A - Permission Denied During Discovery**:
+1. Create resources with deployment script
+2. Switch to an account with insufficient permissions (e.g., Reader role only)
+3. Run deletion script: `./subscription-level-deletion.sh --subscription-id="$SUBSCRIPTION_ID" --nonce="$NONCE" --salt-host="$SALT_HOST" --bearer-token="$BEARER_TOKEN" --auto-approve`
+4. Verify detailed error messages during resource discovery
+
+**Expected Results**:
+- Generic error message: "Failed to search for Azure AD applications"
+- Specific Azure CLI error captured: "Azure error: ERROR: Insufficient privileges to complete the operation"
+- Same pattern for custom role discovery: "Failed to search for custom roles" + "Azure error: [specific Azure message]"
+- Same pattern for role assignment discovery with detailed Azure error output
+- Script exits gracefully with proper error codes
+- Log file contains both generic and specific error information
+
+**Test Case B - Invalid Resource IDs During Discovery**:
+1. Create resources with deployment script, then manually modify one resource to break references
+2. Run deletion script and observe error handling during service principal or role assignment discovery
+3. Verify both generic and specific error messages are displayed
+
+**Expected Results**:
+- Clear indication of which discovery step failed
+- Azure CLI error messages preserved and displayed (not silenced)
+- Script continues processing other resource types despite individual failures
+- Detailed error information available for troubleshooting
+
+**Test Case C - Network Connectivity Issues During Discovery**:
+1. Simulate network issues during Azure CLI operations (if possible)
+2. Run deletion script and observe error handling
+3. Verify comprehensive error reporting
+
+**Expected Results**:
+- Network-related Azure CLI errors captured and displayed
+- Clear distinction between network failures and permission issues
+- Helpful troubleshooting information provided
+
+**Notes**:
+- This validates the recent improvement to capture Azure CLI stderr output using `2>&1` instead of `2>/dev/null`
+- Error handling now matches the pattern used in deletion section (lines 552-557)
+- Provides detailed Azure error messages instead of generic "failed to search" messages
+- Improves troubleshooting capabilities during resource discovery failures
+
 ### 7. Backend Integration Tests
 
-#### BCK-001: Successful Backend Notification
+#### BCK-001: Successful Backend Notification ✅
 **Objective**: Test deletion status updates to backend.
 
 **Setup**:
@@ -627,7 +771,7 @@ export BEARER_TOKEN="invalid-token"
 
 ### 8. Special Mode Tests
 
-#### MODE-001: Dry-Run Mode
+#### MODE-001: Dry-Run Mode ✅
 **Objective**: Test dry-run functionality.
 
 **Steps**:
@@ -642,7 +786,7 @@ export BEARER_TOKEN="invalid-token"
 - No actual resource deletions performed
 - Resources remain intact after script completion
 
-#### MODE-002: Auto-Approve Mode
+#### MODE-002: Auto-Approve Mode ✅
 **Objective**: Test automatic approval functionality.
 
 **Steps**:
@@ -655,7 +799,7 @@ export BEARER_TOKEN="invalid-token"
 - No interactive prompts for deletion confirmation
 - Deletion proceeds automatically
 
-#### MODE-003: Interactive Mode (Dual Confirmation System)
+#### MODE-003: Interactive Mode (Dual Confirmation System) ✅
 **Objective**: Test user confirmation prompts with dual confirmation system.
 
 **Steps**:
@@ -769,13 +913,16 @@ Use this checklist to track test execution:
 - [✅] DEL-001: Successful full deletion
 - [✅] DEL-002: Deletion order verification
 - [ ] DEL-003: Partial deletion failure
+- [✅] DEL-004: Resources deleted between discovery and execution
 
 ### Error Handling Tests
-- [ ] ERR-001: SIGINT handling
-- [ ] ERR-002: Azure API failures
+- [✅] ERR-001: SIGINT handling
+- [✅] ERR-002: SIGTERM handling
+- [ ] ERR-003: Azure API failures
+- [ ] ERR-004: Enhanced Azure CLI Error Reporting
 
 ### Backend Integration Tests
-- [ ] BCK-001: Successful backend notification
+- [✅] BCK-001: Successful backend notification
 - [ ] BCK-001a: Salt US Dashboard Deletion Notification
 - [ ] BCK-001b: Salt EU Dashboard Deletion Notification
 - [ ] BCK-001c: Cross-Region Dashboard Deletion Validation
@@ -784,9 +931,9 @@ Use this checklist to track test execution:
 - [ ] BCK-003: Invalid bearer token
 
 ### Special Mode Tests
-- [ ] MODE-001: Dry-run mode
-- [ ] MODE-002: Auto-approve mode
-- [ ] MODE-003: Interactive mode (dual confirmation)
+- [✅] MODE-001: Dry-run mode
+- [✅] MODE-002: Auto-approve mode
+- [✅] MODE-003: Interactive mode (dual confirmation)
 - [ ] MODE-004: Dual confirmation edge cases
 
 ### Edge Case Tests
