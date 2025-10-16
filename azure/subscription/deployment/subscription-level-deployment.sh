@@ -855,10 +855,10 @@ if [ "$error_occurred" = false ]; then
     max_retries=5
 
     while [ $retry_count -lt $max_retries ]; do
-        if az role assignment create \
+        if error_output=$(az role assignment create \
           --assignee "$sp_object_id" \
           --role "$role_definition_id" \
-          --scope "/subscriptions/$SUBSCRIPTION_ID" >/dev/null 2>&1; then
+          --scope "/subscriptions/$SUBSCRIPTION_ID" 2>&1); then
             log_info "✅  Role assignment created" "${GREEN}"
             log_info ""
             break
@@ -869,6 +869,7 @@ if [ "$error_occurred" = false ]; then
                 sleep 10
             else
                 handle_error "Failed to create role assignment after $max_retries attempts"
+                handle_error "Azure error: $error_output"
             fi
         fi
     done
