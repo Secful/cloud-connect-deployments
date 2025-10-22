@@ -121,7 +121,7 @@ cleanup() {
                 # Get the role ID if we don't have it yet
                 local cleanup_role_id="$role_definition_id"
                 if [ -z "$cleanup_role_id" ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
-                    if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                    if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
                         if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                             cleanup_role_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                         fi
@@ -130,14 +130,20 @@ cleanup() {
 
                 if [ -n "$cleanup_role_id" ]; then
                     # Get ALL role assignments for this role (not just for our service principal)
+                    # Use role name like the verification commands do
                     if assignments=$(az role assignment list \
-                        --role "$cleanup_role_id" \
-                        --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" \
-                        --query "[].{id:id}" -o json 2>/dev/null); then
+                        --role "$ROLE_NAME_WITH_NONCE" \
+                        --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" \
+                        --query "[]" -o json 2>/dev/null); then
 
                         if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
                             assignment_count=$(echo "$assignments" | jq length)
-                            log_info "Found $assignment_count role assignment(s) to delete" "${YELLOW}"
+                            log_info "Found $assignment_count role assignment(s) to delete:" "${YELLOW}"
+                            
+                            # List each role assignment before deletion
+                            echo "$assignments" | jq -r '.[] | "  • Assignment ID: \(.id)"' | while read -r assignment_info; do
+                                log_info "$assignment_info" "${YELLOW}"
+                            done
 
                             # Delete each role assignment
                             echo "$assignments" | jq -r '.[].id' | while read -r assignment_id; do
@@ -155,11 +161,7 @@ cleanup() {
                                 fi
                             done
                         else
-                            if [ "$is_interrupt" = true ]; then
-                                log_info "✅  No role assignments found for this role - nothing to clean up" "${GREEN}"
-                            else
-                                log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
-                            fi
+                            log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
                         fi
                     else
                         log_warning "Could not check for role assignments"
@@ -169,11 +171,12 @@ cleanup() {
                 log_info "No custom role was created during this deployment - skipping role assignment cleanup" "${YELLOW}"
             fi
 
-            # Step 2: Delete custom role (now that assignments are gone)
+            # Step 2: Delete custom role
+            log_info ""
             log_info "Checking if custom role was created during this deployment..." "${YELLOW}"
             if [ "$role_created_this_run" = true ] && [ -n "$role_definition_id" ]; then
                 log_info "Custom role was created. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
-                if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" 2>&1); then
+                if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
                     if [ "$is_interrupt" = true ]; then
                         log_info "✅  Custom role deleted successfully" "${GREEN}"
                     else
@@ -185,13 +188,13 @@ cleanup() {
             elif [ "$role_created_this_run" = true ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
                 # Fallback: check if role exists by name and delete it (handles race conditions)
                 # Use role definition list to find the role by name pattern, then extract ID
-                if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
                     if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                         role_definition_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                         if [ -n "$role_definition_id" ] && [ "$role_definition_id" != "null" ]; then
                             log_info "Custom role found. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
                             log_info "Role ID: $role_definition_id" "${YELLOW}"
-                            if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" 2>&1); then
+                            if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
                                 if [ "$is_interrupt" = true ]; then
                                     log_info "✅  Custom role deleted successfully" "${GREEN}"
                                 else
@@ -678,13 +681,13 @@ log_info "╔══════════════════════�
 log_info "║                          AZURE AUTHENTICATION SETUP                              ║" "${BLUE}${BOLD}"
 log_info "╚══════════════════════════════════════════════════════════════════════════════════╝" "${BLUE}${BOLD}"
 log_info ""
-log_info "This script will create and configure Azure authentication components for all subscriptions under your management group:" "${CYAN}"
+log_info "This script will create and configure Azure authentication components at management group level:" "${CYAN}"
 log_info ""
-log_info "• App Registration - Creates your application identity in Azure AD" "${YELLOW}"
-log_info "• Client Secret - Generates a secure password for your application" "${YELLOW}"
-log_info "• Service Principal - Creates a security identity that can be assigned permissions" "${YELLOW}"
-log_info "• Custom Role - Defines specific permissions for API Management, Kubernetes, and Resource Groups" "${YELLOW}"
-log_info "• Role Assignment - Grants the custom role permissions to your service principal" "${YELLOW}"
+log_info "• App Registration - Creates your application identity in Azure AD (tenant-wide scope)" "${YELLOW}"
+log_info "• Client Secret - Generates a secure password for your application (2-year validity)" "${YELLOW}"
+log_info "• Service Principal - Creates a security identity that can be assigned permissions (tenant-wide scope)" "${YELLOW}"
+log_info "• Custom Role - Defines specific permissions for API Management, Kubernetes, and Resource Groups (management group scope)" "${YELLOW}"
+log_info "• Role Assignment - Grants the custom role permissions to your service principal (management group scope, inherits to all child subscriptions)" "${YELLOW}"
 log_info "• Salt Security Integration - Securely sends deployment status to Salt Security" "${YELLOW}"
 log_info ""
 log_info "Target Management Group: $MANAGEMENT_GROUP_ID" "${MAGENTA}${BOLD}"
@@ -873,7 +876,7 @@ if [ "$error_occurred" = false ]; then
     log_info "Creating custom role: $ROLE_NAME_WITH_NONCE" "${CYAN}${BOLD}"
 
     # Check if role already exists (should be rare with nonce, but check anyway)
-    if existing_role=$(az role definition list --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" --query "[0]" 2>/dev/null) && [ "$existing_role" != "null" ] && [ -n "$existing_role" ]; then
+    if existing_role=$(az role definition list --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[0]" 2>/dev/null) && [ "$existing_role" != "null" ] && [ -n "$existing_role" ]; then
         existing_role_id=$(echo "$existing_role" | jq -r '.id')
         handle_error "Custom role '$ROLE_NAME_WITH_NONCE' already exists (ID: $existing_role_id). Please choose a different name or delete the existing role first."
     else
@@ -889,7 +892,7 @@ if [ "$error_occurred" = false ]; then
   "NotActions": [],
   "DataActions": [],
   "NotDataActions": [],
-  "AssignableScopes": ["/providers/Microsoft.Management/managementGroups/Management-Group-Test1"]
+  "AssignableScopes": ["/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID"]
 }
 EOF
 )
@@ -926,7 +929,7 @@ if [ "$error_occurred" = false ]; then
     
     while [ $verify_retry_count -lt $max_verify_retries ]; do
         role_guid="${role_definition_id##*/}"
-        if az role definition show --name "$role_guid" --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" >/dev/null 2>&1; then
+        if az role definition show --name "$role_guid" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" >/dev/null 2>&1; then
             log_info "✅  Role is now visible at management group scope" "${GREEN}"
             break
         else
@@ -955,7 +958,7 @@ if [ "$error_occurred" = false ]; then
           --assignee-principal-type ServicePrincipal \
           --assignee-object-id "$sp_object_id" \
           --role "$role_guid" \
-          --scope "/providers/Microsoft.Management/managementGroups/Management-Group-Test1" 2>&1); then
+          --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
             # Extract assignment ID from output
             assignment_id=$(echo "$assignment_output" | jq -r '.id // empty' 2>/dev/null)
             if [ -n "$assignment_id" ]; then

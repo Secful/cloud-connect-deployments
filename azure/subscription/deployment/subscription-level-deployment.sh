@@ -133,12 +133,17 @@ cleanup() {
                     if assignments=$(az role assignment list \
                         --role "$cleanup_role_id" \
                         --scope "/subscriptions/$SUBSCRIPTION_ID" \
-                        --query "[].{id:id}" -o json 2>/dev/null); then
+                        --query "[]" -o json 2>/dev/null); then
                         
                         if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
                             assignment_count=$(echo "$assignments" | jq length)
-                            log_info "Found $assignment_count role assignment(s) to delete" "${YELLOW}"
+                            log_info "Found $assignment_count role assignment(s) to delete:" "${YELLOW}"
                             
+                            # List each role assignment before deletion
+                            echo "$assignments" | jq -r '.[] | "  • Assignment ID: \(.id)"' | while read -r assignment_info; do
+                                log_info "$assignment_info" "${YELLOW}"
+                            done
+
                             # Delete each role assignment
                             echo "$assignments" | jq -r '.[].id' | while read -r assignment_id; do
                                 if [ -n "$assignment_id" ]; then
@@ -155,11 +160,7 @@ cleanup() {
                                 fi
                             done
                         else
-                            if [ "$is_interrupt" = true ]; then
-                                log_info "✅  No role assignments found for this role - nothing to clean up" "${GREEN}"
-                            else
-                                log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
-                            fi
+                            log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
                         fi
                     else
                         log_warning "Could not check for role assignments"
@@ -170,6 +171,7 @@ cleanup() {
             fi
             
             # Step 2: Delete custom role (now that assignments are gone)
+            log_info ""
             log_info "Checking if custom role was created during this deployment..." "${YELLOW}"
             if [ "$role_created_this_run" = true ] && [ -n "$role_definition_id" ]; then
                 log_info "Custom role was created. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
