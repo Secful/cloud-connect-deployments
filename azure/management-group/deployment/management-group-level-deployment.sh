@@ -121,7 +121,8 @@ cleanup() {
                 # Get the role ID if we don't have it yet
                 local cleanup_role_id="$role_definition_id"
                 if [ -z "$cleanup_role_id" ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
-                    if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                    # Use first management group for role definition lookup since role exists globally
+                    if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/${MANAGEMENT_GROUP_IDS[0]}" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
                         if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                             cleanup_role_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                         fi
@@ -129,16 +130,38 @@ cleanup() {
                 fi
 
                 if [ -n "$cleanup_role_id" ]; then
-                    # Get ALL role assignments for this role (not just for our service principal)
-                    # Use role name like the verification commands do
-                    if assignments=$(az role assignment list \
-                        --role "$ROLE_NAME_WITH_NONCE" \
-                        --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" \
-                        --query "[]" -o json 2>/dev/null); then
+                    # Get ALL role assignments for this role across all management groups
+                    log_info "Checking for role assignments across all management groups..." "${YELLOW}"
+                    
+                    all_assignments="[]"
+                    total_assignments=0
+                    
+                    for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+                        log_info "Checking role assignments for management group: $mg_id" "${YELLOW}"
+                        if mg_assignments=$(az role assignment list \
+                            --role "$ROLE_NAME_WITH_NONCE" \
+                            --scope "/providers/Microsoft.Management/managementGroups/$mg_id" \
+                            --query "[]" -o json 2>/dev/null); then
+                            
+                            if [ "$mg_assignments" != "[]" ] && [ -n "$mg_assignments" ]; then
+                                mg_count=$(echo "$mg_assignments" | jq length)
+                                log_info "Found $mg_count assignment(s) for management group: $mg_id" "${YELLOW}"
+                                total_assignments=$((total_assignments + mg_count))
+                                # Merge assignments
+                                all_assignments=$(echo "$all_assignments $mg_assignments" | jq -s 'add')
+                            else
+                                log_info "No assignments found for management group: $mg_id" "${YELLOW}"
+                            fi
+                        else
+                            log_warning "Could not check role assignments for management group: $mg_id"
+                        fi
+                    done
+                    
+                    if [ $total_assignments -gt 0 ]; then
+                        assignments="$all_assignments"
 
-                        if [ "$assignments" != "[]" ] && [ -n "$assignments" ]; then
-                            assignment_count=$(echo "$assignments" | jq length)
-                            log_info "Found $assignment_count role assignment(s) to delete:" "${YELLOW}"
+                        assignment_count=$total_assignments
+                        log_info "Found $assignment_count role assignment(s) across all management groups to delete:" "${YELLOW}"
                             
                             # List each role assignment before deletion
                             echo "$assignments" | jq -r '.[] | "  • Assignment ID: \(.id)"' | while read -r assignment_info; do
@@ -160,11 +183,8 @@ cleanup() {
                                     fi
                                 fi
                             done
-                        else
-                            log_info "No role assignments found for this role - nothing to clean up" "${YELLOW}"
-                        fi
                     else
-                        log_warning "Could not check for role assignments"
+                        log_info "No role assignments found across all management groups - nothing to clean up" "${YELLOW}"
                     fi
                 fi
             else
@@ -176,32 +196,53 @@ cleanup() {
             log_info "Checking if custom role was created during this deployment..." "${YELLOW}"
             if [ "$role_created_this_run" = true ] && [ -n "$role_definition_id" ]; then
                 log_info "Custom role was created. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
-                if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
-                    if [ "$is_interrupt" = true ]; then
-                        log_info "✅  Custom role deleted successfully" "${GREEN}"
+                
+                role_deleted=false
+                for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+                    log_info "Attempting to delete role from management group: $mg_id" "${YELLOW}"
+                    if role_delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$mg_id" 2>&1); then
+                        role_deleted=true
+                        if [ "$is_interrupt" = true ]; then
+                            log_info "✅  Custom role deleted successfully from management group: $mg_id" "${GREEN}"
+                        else
+                            log_info "Custom role deleted successfully from management group: $mg_id" "${YELLOW}"
+                        fi
+                        break  # Role deleted successfully, no need to try other management groups
                     else
-                        log_info "Custom role deleted successfully" "${YELLOW}"
+                        log_info "Could not delete role from management group $mg_id: $role_delete_result" "${YELLOW}"
                     fi
-                else
-                    log_error "Custom role deletion failed: $role_delete_result"
+                done
+                
+                if [ "$role_deleted" = false ]; then
+                    log_error "Custom role deletion failed from all management groups"
                 fi
             elif [ "$role_created_this_run" = true ] && [ -n "$ROLE_NAME_WITH_NONCE" ]; then
                 # Fallback: check if role exists by name and delete it (handles race conditions)
-                # Use role definition list to find the role by name pattern, then extract ID
-                if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
+                # Use first management group to find the role
+                if role_list_result=$(az role definition list --scope "/providers/Microsoft.Management/managementGroups/${MANAGEMENT_GROUP_IDS[0]}" --query "[?roleName=='$ROLE_NAME_WITH_NONCE']" 2>&1); then
                     if [ "$role_list_result" != "[]" ] && [ -n "$role_list_result" ]; then
                         role_definition_id=$(echo "$role_list_result" | jq -r '.[0].id // empty' 2>/dev/null)
                         if [ -n "$role_definition_id" ] && [ "$role_definition_id" != "null" ]; then
                             log_info "Custom role found. Deleting custom role: $ROLE_NAME_WITH_NONCE" "${YELLOW}"
                             log_info "Role ID: $role_definition_id" "${YELLOW}"
-                            if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
-                                if [ "$is_interrupt" = true ]; then
-                                    log_info "✅  Custom role deleted successfully" "${GREEN}"
+                            role_deleted=false
+                            for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+                                log_info "Attempting to delete role from management group: $mg_id" "${YELLOW}"
+                                if delete_result=$(az role definition delete --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$mg_id" 2>&1); then
+                                    role_deleted=true
+                                    if [ "$is_interrupt" = true ]; then
+                                        log_info "✅  Custom role deleted successfully from management group: $mg_id" "${GREEN}"
+                                    else
+                                        log_info "Custom role deleted successfully from management group: $mg_id" "${YELLOW}"
+                                    fi
+                                    break  # Role deleted successfully, no need to try other management groups
                                 else
-                                    log_info "Custom role deleted successfully" "${YELLOW}"
+                                    log_info "Could not delete role from management group $mg_id: $delete_result" "${YELLOW}"
                                 fi
-                            else
-                                log_error "Custom role deletion failed: $delete_result"
+                            done
+                            
+                            if [ "$role_deleted" = false ]; then
+                                log_error "Custom role deletion failed from all management groups"
                             fi
                         else
                             log_info "Custom role found in list but could not extract ID" "${YELLOW}"
@@ -303,19 +344,21 @@ check_azure_auth() {
         exit 1
     fi
 
-    # Check if we can access the target management group
-    if ! az account management-group show --name "$MANAGEMENT_GROUP_ID" &>/dev/null; then
-        log_error "Cannot access management group '$MANAGEMENT_GROUP_ID'" >&2
-        log_error "Please verify:" >&2
-        log_error "  1. The management group ID is correct and exists" >&2
-        log_error "  2. You have access to this management group" >&2
-        log_error "  3. Try running: az account management-group list --output table" >&2
-        log_error "     (This shows all management groups you have access to)" >&2
-        exit 1
-    fi
+    # Check if we can access all target management groups
+    for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+        if ! az account management-group show --name "$mg_id" &>/dev/null; then
+            log_error "Cannot access management group '$mg_id'" >&2
+            log_error "Please verify:" >&2
+            log_error "  1. The management group ID is correct and exists" >&2
+            log_error "  2. You have access to this management group" >&2
+            log_error "  3. Try running: az account management-group list --output table" >&2
+            log_error "     (This shows all management groups you have access to)" >&2
+            exit 1
+        fi
 
-    mg_display_name=$(az account management-group show --name "$MANAGEMENT_GROUP_ID" --query displayName -o tsv 2>/dev/null)
-    log_info "✅  Authenticated to Azure management group: $mg_display_name ($MANAGEMENT_GROUP_ID)" "${GREEN}"
+        mg_display_name=$(az account management-group show --name "$mg_id" --query displayName -o tsv 2>/dev/null)
+        log_info "✅  Authenticated to Azure management group: $mg_display_name ($mg_id)" "${GREEN}"
+    done
     log_info ""
 }
 
@@ -361,8 +404,10 @@ validate_inputs() {
 
     # Validate parameters in the same order as they are assigned (positions 0-7)
 
-    # Position 0: Management Group ID (name format)
-    validate_name "Management Group ID" "$MANAGEMENT_GROUP_ID"
+    # Position 0: Management Group IDs (name format)
+    for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+        validate_name "Management Group ID" "$mg_id"
+    done
 
     # Position 1: Salt Host format
     validate_url "Salt host" "$SALT_HOST"
@@ -556,7 +601,7 @@ show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Required parameters:"
-    echo "  --management-group-id=<id> Azure management group ID"
+    echo "  --management-group-ids=<ids> Azure management group IDs (comma-separated)"
     echo "  --salt-host=<url>          Salt Host URL for status updates"
     echo "  --bearer-token=<token>     Authentication bearer token"
     echo "  --installation-id=<id>     Installation identifier"
@@ -576,8 +621,8 @@ show_help() {
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --management-group-id=*)
-            MANAGEMENT_GROUP_ID="${1#*=}"
+        --management-group-ids=*)
+            MANAGEMENT_GROUP_IDS_INPUT="${1#*=}"
             shift
             ;;
         --salt-host=*)
@@ -635,8 +680,8 @@ check_dependencies
 
 # Validate that all required parameters are provided
 missing_params=()
-if [ -z "$MANAGEMENT_GROUP_ID" ]; then
-    missing_params+=("--management-group-id")
+if [ -z "$MANAGEMENT_GROUP_IDS_INPUT" ]; then
+    missing_params+=("--management-group-ids")
 fi
 if [ -z "$SALT_HOST" ]; then
     missing_params+=("--salt-host")
@@ -657,6 +702,21 @@ if [ ${#missing_params[@]} -gt 0 ]; then
     exit 1
 fi
 
+# Convert comma-separated management group IDs to array
+IFS=',' read -ra MANAGEMENT_GROUP_IDS <<< "$MANAGEMENT_GROUP_IDS_INPUT"
+
+# Validate that all management group IDs are non-empty
+for i in "${!MANAGEMENT_GROUP_IDS[@]}"; do
+    # Trim whitespace
+    MANAGEMENT_GROUP_IDS[$i]=$(echo "${MANAGEMENT_GROUP_IDS[$i]}" | xargs)
+    
+    if [ -z "${MANAGEMENT_GROUP_IDS[$i]}" ]; then
+        log_error "Empty management group ID found in input: '$MANAGEMENT_GROUP_IDS_INPUT'" >&2
+        exit 1
+    fi
+done
+
+log_info "Found ${#MANAGEMENT_GROUP_IDS[@]} management group(s) to process: ${MANAGEMENT_GROUP_IDS[*]}" "${CYAN}"
 
 # Interactive prompts for APP_NAME and ROLE_NAME if not provided as flags
 if [ -z "$APP_NAME" ]; then
@@ -690,7 +750,7 @@ log_info "• Custom Role - Defines specific permissions for API Management, Kub
 log_info "• Role Assignment - Grants the custom role permissions to your service principal (management group scope, inherits to all child subscriptions)" "${YELLOW}"
 log_info "• Salt Security Integration - Securely sends deployment status to Salt Security" "${YELLOW}"
 log_info ""
-log_info "Target Management Group: $MANAGEMENT_GROUP_ID" "${MAGENTA}${BOLD}"
+log_info "Target Management Groups: ${MANAGEMENT_GROUP_IDS[*]}" "${MAGENTA}${BOLD}"
 log_info "Application Name: $APP_NAME" "${MAGENTA}${BOLD}"
 log_info "Custom Role Name: $ROLE_NAME" "${MAGENTA}${BOLD}"
 log_info ""
@@ -746,17 +806,31 @@ validate_inputs
 # Check Azure CLI authentication before starting deployment
 check_azure_auth
 
-# Get all subscriptions under the management group (cache for later use)
-log_info "Discovering all subscriptions under management group for deployment..." "${CYAN}${BOLD}"
-if CACHED_SUBSCRIPTIONS_LIST=$(get_management_group_subscriptions "$MANAGEMENT_GROUP_ID"); then
-    readarray -t CACHED_SUBSCRIPTIONS_ARRAY <<< "$CACHED_SUBSCRIPTIONS_LIST"
-    log_info "✅  Found the following ${#CACHED_SUBSCRIPTIONS_ARRAY[@]} subscription(s) under management group:" "${GREEN}"
-    for sub in "${CACHED_SUBSCRIPTIONS_ARRAY[@]}"; do
-        log_info "  • $sub" "${NC}"
-    done
+# Get all subscriptions under all management groups (cache for later use)
+log_info "Discovering all subscriptions under ${#MANAGEMENT_GROUP_IDS[@]} management group(s) for deployment..." "${CYAN}${BOLD}"
+CACHED_SUBSCRIPTIONS_ARRAY=()
+
+for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+    if MG_SUBSCRIPTIONS_LIST=$(get_management_group_subscriptions "$mg_id"); then
+        readarray -t MG_SUBSCRIPTIONS_ARRAY <<< "$MG_SUBSCRIPTIONS_LIST"
+        log_info "Management group $mg_id: Found ${#MG_SUBSCRIPTIONS_ARRAY[@]} subscription(s)" "${GREEN}"
+        
+        # Add subscriptions from this management group to the cached array
+        for sub in "${MG_SUBSCRIPTIONS_ARRAY[@]}"; do
+            if [ -n "$sub" ]; then
+                CACHED_SUBSCRIPTIONS_ARRAY+=("$sub")
+                log_info "  • $sub" "${NC}"
+            fi
+        done
+    else
+        handle_error "Failed to discover subscriptions under management group $mg_id"
+        break
+    fi
+done
+
+if [ "$error_occurred" = false ]; then
+    log_info "✅  Total: Found ${#CACHED_SUBSCRIPTIONS_ARRAY[@]} unique subscription(s) across all management groups" "${GREEN}"
     log_info ""
-else
-    handle_error "Failed to discover subscriptions under management group $MANAGEMENT_GROUP_ID"
 fi
 
 # Send initial "Initiated" status to all subscriptions under management group
@@ -875,15 +949,34 @@ if [ "$error_occurred" = false ]; then
     log_info ""
     log_info "Creating custom role: $ROLE_NAME_WITH_NONCE" "${CYAN}${BOLD}"
 
-    # Check if role already exists (should be rare with nonce, but check anyway)
-    if existing_role=$(az role definition list --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" --query "[0]" 2>/dev/null) && [ "$existing_role" != "null" ] && [ -n "$existing_role" ]; then
-        existing_role_id=$(echo "$existing_role" | jq -r '.id')
-        handle_error "Custom role '$ROLE_NAME_WITH_NONCE' already exists (ID: $existing_role_id). Please choose a different name or delete the existing role first."
-    else
+    # Check if role already exists in any management group (should be rare with nonce, but check anyway)
+    role_exists=false
+    for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+        if existing_role=$(az role definition list --name "$ROLE_NAME_WITH_NONCE" --scope "/providers/Microsoft.Management/managementGroups/$mg_id" --query "[0]" 2>/dev/null) && [ "$existing_role" != "null" ] && [ -n "$existing_role" ]; then
+            existing_role_id=$(echo "$existing_role" | jq -r '.id')
+            handle_error "Custom role '$ROLE_NAME_WITH_NONCE' already exists in management group $mg_id (ID: $existing_role_id). Please choose a different name or delete the existing role first."
+            role_exists=true
+            break
+        fi
+    done
+
+    if [ "$role_exists" = false ]; then
+        # Build AssignableScopes array for all management groups
+        assignable_scopes_json="["
+        for i in "${!MANAGEMENT_GROUP_IDS[@]}"; do
+            if [ $i -gt 0 ]; then
+                assignable_scopes_json+=","
+            fi
+            assignable_scopes_json+="\"/providers/Microsoft.Management/managementGroups/${MANAGEMENT_GROUP_IDS[$i]}\""
+        done
+        assignable_scopes_json+="]"
+
+        log_info "Creating role with AssignableScopes for ${#MANAGEMENT_GROUP_IDS[@]} management group(s)" "${CYAN}"
+
         role_definition=$(cat <<EOF
 {
   "Name": "$ROLE_NAME_WITH_NONCE",
-  "Description": "Custom role for application with specific permissions",
+  "Description": "Custom role for application with specific permissions across multiple management groups",
   "Actions": [
     "Microsoft.ApiManagement/*/read",
     "Microsoft.ContainerService/managedClusters/read",
@@ -892,7 +985,7 @@ if [ "$error_occurred" = false ]; then
   "NotActions": [],
   "DataActions": [],
   "NotDataActions": [],
-  "AssignableScopes": ["/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID"]
+  "AssignableScopes": $assignable_scopes_json
 }
 EOF
 )
@@ -917,9 +1010,9 @@ EOF
     fi
 fi
 
-# 6. Assign role to service principal (with retry)
+# 6. Assign role to service principal across all management groups (with retry)
 if [ "$error_occurred" = false ]; then
-    log_info "Assigning custom role to service principal..." "${CYAN}${BOLD}"
+    log_info "Assigning custom role to service principal across ${#MANAGEMENT_GROUP_IDS[@]} management group(s)..." "${CYAN}${BOLD}"
     
     # First, verify the role is visible at management group scope before attempting assignment
     log_info "Verifying role is visible at management group scope..." "${CYAN}"
@@ -929,7 +1022,8 @@ if [ "$error_occurred" = false ]; then
     
     while [ $verify_retry_count -lt $max_verify_retries ]; do
         role_guid="${role_definition_id##*/}"
-        if az role definition show --name "$role_guid" --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" >/dev/null 2>&1; then
+        # Check visibility on first management group (role should be visible across all scopes once created)
+        if az role definition show --name "$role_guid" --scope "/providers/Microsoft.Management/managementGroups/${MANAGEMENT_GROUP_IDS[0]}" >/dev/null 2>&1; then
             log_info "✅  Role is now visible at management group scope" "${GREEN}"
             break
         else
@@ -945,47 +1039,61 @@ if [ "$error_occurred" = false ]; then
     done
     
     if [ $verify_retry_count -ge $max_verify_retries ]; then
-        log_error "Skipping role assignment due to verification failure"
+        log_error "Skipping role assignments due to verification failure"
     else
-        # Now attempt role assignment
-        retry_count=0
-        max_retries=10
-        sleep_interval=10
+        # Now attempt role assignment for each management group
+        assignment_success_count=0
+        
+        for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+            log_info "Creating role assignment for management group: $mg_id" "${CYAN}"
+            retry_count=0
+            max_retries=10
+            sleep_interval=10
+            assignment_created=false
 
-        while [ $retry_count -lt $max_retries ]; do
-        role_guid="${role_definition_id##*/}"
-        if assignment_output=$(az role assignment create \
-          --assignee-principal-type ServicePrincipal \
-          --assignee-object-id "$sp_object_id" \
-          --role "$role_guid" \
-          --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" 2>&1); then
-            # Extract assignment ID from output
-            assignment_id=$(echo "$assignment_output" | jq -r '.id // empty' 2>/dev/null)
-            if [ -n "$assignment_id" ]; then
-                log_info "✅  Created role assignment: $assignment_id" "${GREEN}"
-            else
-                log_info "✅  Created role assignment" "${GREEN}"
-            fi
-            log_info ""
-            break
-        else
-            # Check if it's the "role doesn't exist" error
-            if [[ "$assignment_output" =~ "doesn't exist" ]]; then
-                retry_count=$((retry_count + 1))
-                if [ $retry_count -lt $max_retries ]; then
-                    log_info "Role not yet available for assignment, waiting ${sleep_interval} seconds... (attempt $retry_count/$max_retries)" "${YELLOW}"
-                    sleep $sleep_interval
+            while [ $retry_count -lt $max_retries ] && [ "$assignment_created" = false ]; do
+                role_guid="${role_definition_id##*/}"
+                if assignment_output=$(az role assignment create \
+                  --assignee-principal-type ServicePrincipal \
+                  --assignee-object-id "$sp_object_id" \
+                  --role "$role_guid" \
+                  --scope "/providers/Microsoft.Management/managementGroups/$mg_id" 2>&1); then
+                    # Extract assignment ID from output
+                    assignment_id=$(echo "$assignment_output" | jq -r '.id // empty' 2>/dev/null)
+                    if [ -n "$assignment_id" ]; then
+                        log_info "✅  Created role assignment for $mg_id: $assignment_id" "${GREEN}"
+                    else
+                        log_info "✅  Created role assignment for $mg_id" "${GREEN}"
+                    fi
+                    assignment_created=true
+                    assignment_success_count=$((assignment_success_count + 1))
                 else
-                    handle_error "Role assignment failed after $max_retries attempts - role may not have propagated globally yet"
-                    handle_error "Azure error: $assignment_output"
+                    # Check if it's the "role doesn't exist" error
+                    if [[ "$assignment_output" =~ "doesn't exist" ]]; then
+                        retry_count=$((retry_count + 1))
+                        if [ $retry_count -lt $max_retries ]; then
+                            log_info "Role not yet available for assignment to $mg_id, waiting ${sleep_interval} seconds... (attempt $retry_count/$max_retries)" "${YELLOW}"
+                            sleep $sleep_interval
+                        else
+                            log_error "Role assignment failed for $mg_id after $max_retries attempts - role may not have propagated globally yet"
+                            log_error "Azure error: $assignment_output"
+                        fi
+                    else
+                        # Different error, don't retry
+                        log_error "Role assignment failed for $mg_id with unexpected error: $assignment_output"
+                        break
+                    fi
                 fi
-            else
-                # Different error, don't retry
-                handle_error "Role assignment failed with unexpected error: $assignment_output"
-                break
-            fi
-        fi
+            done
         done
+        
+        log_info "Role assignment summary: $assignment_success_count/${#MANAGEMENT_GROUP_IDS[@]} management groups assigned successfully" "${CYAN}"
+        
+        if [ $assignment_success_count -lt ${#MANAGEMENT_GROUP_IDS[@]} ]; then
+            handle_error "Failed to assign role to all management groups ($assignment_success_count/${#MANAGEMENT_GROUP_IDS[@]} successful)"
+        else
+            log_info ""
+        fi
     fi
 fi
 
@@ -1007,19 +1115,31 @@ if [ "$error_occurred" = false ] && [ -n "$role_definition_id" ] && [ -n "$sp_ob
 
         role_guid="${role_definition_id##*/}"
         
-        # First, verify the management group assignment still exists (once for all subscriptions)
-        log_info "Verifying management group assignment exists..." "${CYAN}"
+        # First, verify the management group assignments exist for all management groups
+        log_info "Verifying management group assignments exist..." "${CYAN}"
         
-        mg_assignment_exists=false
-        if az role assignment list \
-            --assignee "$sp_object_id" \
-            --role "$ROLE_NAME_WITH_NONCE" \
-            --scope "/providers/Microsoft.Management/managementGroups/$MANAGEMENT_GROUP_ID" \
-            --query "[0]" -o json 2>/dev/null | grep -q "principalId"; then
-            mg_assignment_exists=true
-            log_info "✅ Management group assignment confirmed" "${GREEN}"
+        mg_assignment_exists=true
+        successful_mg_assignments=0
+        
+        for mg_id in "${MANAGEMENT_GROUP_IDS[@]}"; do
+            log_info "Checking assignment for management group: $mg_id" "${CYAN}"
+            if az role assignment list \
+                --assignee "$sp_object_id" \
+                --role "$ROLE_NAME_WITH_NONCE" \
+                --scope "/providers/Microsoft.Management/managementGroups/$mg_id" \
+                --query "[0]" -o json 2>/dev/null | grep -q "principalId"; then
+                log_info "✅ Assignment confirmed for management group: $mg_id" "${GREEN}"
+                successful_mg_assignments=$((successful_mg_assignments + 1))
+            else
+                log_warning "Assignment not found for management group: $mg_id" "${YELLOW}"
+                mg_assignment_exists=false
+            fi
+        done
+        
+        if [ $successful_mg_assignments -eq ${#MANAGEMENT_GROUP_IDS[@]} ]; then
+            log_info "✅ All management group assignments confirmed ($successful_mg_assignments/${#MANAGEMENT_GROUP_IDS[@]})" "${GREEN}"
         else
-            log_warning "Management group assignment not found" "${YELLOW}"
+            log_warning "Only $successful_mg_assignments/${#MANAGEMENT_GROUP_IDS[@]} management group assignments found" "${YELLOW}"
         fi
         log_info ""
         
@@ -1162,7 +1282,7 @@ if [ "$error_occurred" = true ]; then
     log_error "Error: $error_message"
 else
     log_info "=== Service Principal Setup Complete ===" "${YELLOW}${BOLD}"
-    log_info "Management Group ID: $MANAGEMENT_GROUP_ID"
+    log_info "Management Group IDs: $(IFS=', '; echo "${MANAGEMENT_GROUP_IDS[*]}")"
     log_info "Application ID (Client ID): $app_id"
     log_info "Tenant ID: $tenant_id"
     log_info "Service Principal Object ID: $sp_object_id"
